@@ -46,49 +46,41 @@ op --version
 
 You need at minimum one API token. For production, create separate tokens — one for the scripts and one for the Slack bot — so you can revoke them independently.
 
+Create **two tokens** — one for the scripts, one for the Slack bot — so you can revoke them independently.
+
+**Token 1 — Scripts (`snaprestore-scripts`):**
+Used by `do-restore.sh` and `do-snapshot.sh` via the doctl context. This token needs full read/write access to droplets, snapshots, SSH keys, and reserved IPs.
+
 1. Log in to [cloud.digitalocean.com](https://cloud.digitalocean.com).
 2. Go to **API** → **Tokens** → **Generate New Token**.
-3. Give it a descriptive name (e.g., `snaprestore-scripts`).
-4. Select **Custom Scopes** and enable the permissions for the operations you need:
+3. Name it `snaprestore-scripts`.
+4. Select **Custom Scopes** and enable **all** of the following:
 
-**`do-snapshot.sh` requires:**
-
-| Scope | Description |
+| Scope | Required by |
 |-------|-------------|
-| `droplet:read` | List and view droplets |
-| `droplet:update` | Power off droplet; trigger snapshot via Droplet Actions API |
-| `droplet:delete` | Delete droplet after snapshot (if chosen) |
-| `snapshot:read` | List and inspect snapshots |
-| `snapshot:delete` | Prune old snapshots |
-| `reserved_ip:read` | Read reserved IP assignments |
+| `droplet:read` | Both scripts — list and inspect droplets |
+| `droplet:create` | `do-restore.sh` — create a new droplet from snapshot |
+| `droplet:update` | `do-snapshot.sh` — power off droplet; trigger snapshot action |
+| `droplet:delete` | `do-snapshot.sh` — delete droplet after snapshot (optional) |
+| `snapshot:read` | Both scripts — list and select snapshots |
+| `snapshot:delete` | `do-snapshot.sh` — prune old snapshots |
+| `ssh_key:read` | `do-restore.sh` — list SSH keys to attach at creation |
+| `reserved_ip:read` | Both scripts — list reserved IPs |
+| `reserved_ip:update` | `do-restore.sh` — assign reserved IP to restored droplet |
+| `action:read` | `do-restore.sh` — poll reserved IP assignment action status |
 
-**`do-restore.sh` requires:**
+> **Missing `droplet:create` is the most common setup mistake.** Without it, the restore wizard completes normally but the droplet is never created and no error is shown.
 
-| Scope | Description |
-|-------|-------------|
-| `droplet:read` | List droplets |
-| `droplet:create` | Create a new droplet from snapshot |
-| `snapshot:read` | List and select snapshots |
-| `ssh_key:read` | List SSH keys to attach at creation |
-| `reserved_ip:read` | List reserved IPs |
-| `reserved_ip:update` | Assign reserved IP to the restored droplet |
+5. Click **Generate Token**, copy the value — **shown only once** — and store it in 1Password immediately (see Part 3).
 
-**Slack bot token (create a separate token named e.g., `snaprestore-bot`):**
+---
 
-| Scope | Description |
-|-------|-------------|
-| `droplet:read` | List and view droplets |
-| `droplet:create` | Create droplets from snapshots |
-| `droplet:update` | Power off droplet; trigger snapshot |
-| `droplet:delete` | Delete droplets |
-| `snapshot:read` | List and inspect snapshots |
-| `snapshot:delete` | Prune old snapshots |
-| `reserved_ip:read` | List reserved IPs |
-| `reserved_ip:update` | Assign reserved IP to restored droplet |
+**Token 2 — Slack bot (`snaprestore-bot`):**
+Used by the Slack bot service. Create a second token with the same scope table above plus any additional scopes the bot needs.
 
-> **Note — “Droplet Action” scope no longer exists.** DigitalOcean’s current custom scopes system (GA’d 2024) uses granular CRUD scopes per resource type. There is no separate “Droplet Action” entry in the token dashboard. Snapshot creation is triggered via the Droplet Actions API endpoint and is covered by **`droplet:update`**. The full scopes reference is at [docs.digitalocean.com/reference/api/scopes](https://docs.digitalocean.com/reference/api/scopes/).
+---
 
-5. Click **Generate Token** and copy the value — **it is shown only once**. Store it in 1Password immediately (see Part 3).
+> **Note — “Droplet Action” scope no longer exists.** DigitalOcean’s current custom scopes UI (GA’d 2024) uses granular CRUD scopes per resource. Snapshot creation is triggered via the Droplet Actions API and is covered by `droplet:update`. Full reference: [docs.digitalocean.com/reference/api/scopes](https://docs.digitalocean.com/reference/api/scopes/).
 
 > **WARNING:** Never paste a raw token into a script, commit it to git, or store it in shell history.
 
