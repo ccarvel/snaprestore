@@ -73,7 +73,7 @@ ui_spinner_start() {
         "$TC" "$ts" "$eta_str" "$R" \
         10 ""
       idx=$(( (idx + 1) % 8 ))
-      (( tick++ ))
+      (( tick++ )) || true
       sleep 0.1
     done
   ) &

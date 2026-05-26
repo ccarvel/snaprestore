@@ -387,7 +387,7 @@ if [[ -n "$RESERVED_IP" ]]; then
 
     ASSIGN_OUTPUT=$(doctl_cmd compute reserved-ip-action assign \
       "$RESERVED_IP" "$NEW_DROPLET_ID" --output json)
-    ASSIGN_ACTION_ID=$(echo "$ASSIGN_OUTPUT" | jq -r '.action.id // .[0].id')
+    ASSIGN_ACTION_ID=$(echo "$ASSIGN_OUTPUT" | jq -r 'if type=="array" then .[0].action.id else .action.id end')
 
     ASSIGN_STATUS=""
     for _ in $(seq 1 24); do   # max 2 minutes
