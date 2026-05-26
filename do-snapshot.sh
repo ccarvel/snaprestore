@@ -7,7 +7,7 @@ set -eo pipefail
 DROPLET_ID=""       # Droplet ID, or leave blank for interactive selection
 SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{YYYYMMDD-HHMM}
 OP_ITEM=""          # Optional: 1Password path, e.g. op://Private/DigitalOcean/token
-DOCTL_CONTEXT=""    # Optional: doctl auth context name, e.g. "snaprestore"
+DOCTL_CONTEXT="default"    # doctl auth context name (doctl auth list to see yours)
 #-----------------------------------------
 
 # ── flag parsing ──────────────────────────────────────────────────────────────

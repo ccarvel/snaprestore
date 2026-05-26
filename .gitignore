@@ -2,6 +2,7 @@
 slack-bot/.env.op
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *.p12

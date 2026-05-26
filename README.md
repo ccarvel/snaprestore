@@ -105,6 +105,17 @@ Create a custom-scoped token at [DigitalOcean API Tokens](https://cloud.digitalo
 | SSH Key | read |
 | Reserved IP | read, update |
 
+### 4. Environment file
+
+Copy `.env.example` to `.env` (already listed in `.gitignore`) and update the `op://` references to match your vault paths. All variables are documented in `.env.example` with comments.
+
+```bash
+cp .env.example .env
+# Edit .env if your vault item paths differ from the defaults
+```
+
+For `op run` injection, `.env` must contain `op://` references — not raw tokens.
+
 ---
 
 ## Token Loading Order
@@ -126,11 +137,12 @@ export DIGITALOCEAN_ACCESS_TOKEN="$(op read 'op://Private/DigitalOcean API Token
 ./do-snapshot.sh
 ```
 
-Or use `op run` to inject automatically:
+Or use `op run` with the provided example file:
 
 ```bash
+cp .env.example .env          # copy the template (gitignored)
 op run --env-file=.env -- ./do-snapshot.sh
-# .env contains: DIGITALOCEAN_ACCESS_TOKEN=op://Private/DigitalOcean API Token/credential
+op run --env-file=.env -- ./do-restore.sh
 ```
 
 ---
@@ -642,16 +654,24 @@ uv run python bot.py
 ### File structure
 
 ```
-slack-bot/
-├── bot.py                    # Slack Bolt async app (Socket Mode)
-├── pyproject.toml            # Python dependencies (slack-bolt, httpx)
-├── manifest.yml              # Slack app manifest (paste at api.slack.com)
-├── .env.op.example           # 1Password op:// reference template
-├── start.sh                  # op run wrapper to launch the bot
-├── systemd/
-│   └── do-snap-bot.service   # systemd unit (deployed by cloud-init)
-└── cloud-init/
-    └── controller.yml        # Cloud-init for controller droplet provisioning
+snaprestore/
+├── do-snapshot.sh            # Snapshot a droplet (shutdown → snapshot → start/leave/delete)
+├── do-restore.sh             # Restore a droplet from snapshot + assign reserved IP
+├── .env.example              # Environment variable reference with op:// examples (tracked)
+├── lib/
+│   ├── bootstrap_sh.sh       # UI bootstrap (gum detection, dependency checks)
+│   ├── ui_sh.sh              # Shell UI primitives (spinner, panel, choose, confirm)
+│   └── ui_rich_py.py         # Rich/gum UI layer (optional enhanced output)
+└── slack-bot/
+    ├── bot.py                # Slack Bolt async app (Socket Mode)
+    ├── pyproject.toml        # Python dependencies (slack-bolt, httpx)
+    ├── manifest.yml          # Slack app manifest (paste at api.slack.com)
+    ├── .env.op.example       # 1Password op:// reference template for the bot
+    ├── start.sh              # op run wrapper to launch the bot
+    ├── systemd/
+    │   └── do-snap-bot.service  # systemd unit (deployed by cloud-init)
+    └── cloud-init/
+        └── controller.yml    # Cloud-init for controller droplet provisioning
 ```
 
 ---

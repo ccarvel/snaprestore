@@ -10,7 +10,7 @@ SIZE_SLUG=""        # Droplet size slug, or blank to prompt
 DROPLET_NAME=""     # Optional: defaults to restored-{snapshot-name}-{YYYYMMDD}
 RESERVED_IP=""      # Reserved IP to assign, or blank to prompt
 OP_ITEM=""          # Optional: 1Password path, e.g. op://Private/DigitalOcean/token
-DOCTL_CONTEXT=""    # Optional: doctl auth context name, e.g. "snaprestore"
+DOCTL_CONTEXT="default"    # doctl auth context name (doctl auth list to see yours)
 #-----------------------------------------
 
 # ── flag parsing ──────────────────────────────────────────────────────────────
