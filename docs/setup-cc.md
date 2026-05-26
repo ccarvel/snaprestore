@@ -30,6 +30,12 @@ Install required tools before starting:
 | `fzf` | Optional (arrow-key menus) | `brew install fzf` |
 | `gum` | Optional (rich TUI on first run) | `brew install gum` |
 
+Install all at once:
+
+```bash
+brew install doctl jq 1password-cli fzf gum
+```
+
 Verify installs:
 
 ```bash

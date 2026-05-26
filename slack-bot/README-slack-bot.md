@@ -194,8 +194,15 @@ In Slack, open your `#do-ops` channel and run:
 
 #### 2.1 Install and sign in to 1Password CLI
 
+Install all local dependencies at once (if not already done from the main setup):
+
 ```bash
-brew install 1password-cli
+brew install doctl jq 1password-cli fzf gum uv
+```
+
+Then sign in to 1Password:
+
+```bash
 op signin
 ```
 

@@ -28,6 +28,13 @@ Two companion scripts for managing DigitalOcean droplet snapshots: create a snap
 |------|---------|---------|
 | `fzf` | Arrow-key selection menus (falls back to numbered menus) | `brew install fzf` |
 | `1password-cli` | Secure token injection via `op read` | `brew install 1password-cli` |
+| `gum` | Rich TUI prompts on first run | `brew install gum` |
+
+### Install all at once
+
+```bash
+brew install doctl jq 1password-cli fzf gum
+```
 
 ### Ubuntu/Debian equivalents
 
