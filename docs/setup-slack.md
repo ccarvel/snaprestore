@@ -95,25 +95,43 @@ Open `slack-bot/cloud-init/controller.yml` and replace both placeholders:
 
 ## Part 4 — Create the Controller Droplet
 
-1. Log in to [cloud.digitalocean.com](https://cloud.digitalocean.com) → **Droplets** → **Create Droplet**.
-2. Configure:
-   - **Image:** Ubuntu 22.04 (LTS) x64
-   - **Size:** Basic → Regular CPU → **$6/mo** (1 vCPU, 1 GB RAM, 25 GB SSD)
-   - **Region:** match your other droplets
-   - **Authentication:** SSH Key — select your key
-3. Expand **Advanced Options** → **Add Initialization scripts (free)** → paste the full contents of your edited `controller.yml`.
-4. Click **Create Droplet**.
+**Use `doctl` to create the droplet — do not paste `controller.yml` into the DO console UI.** Pasting via browser can silently introduce non-ASCII characters that break YAML parsing and prevent cloud-init from running at all (see `docs/setup-notes.md`).
 
-Cloud-init takes **3–5 minutes**. Monitor progress:
+First, find your SSH key ID:
 
 ```bash
-ssh dosnap@<controller-ip> "sudo tail -f /var/log/cloud-init-output.log"
+doctl compute ssh-key list
 ```
 
-When it settles, verify the tools are installed:
+Then create the droplet:
 
 ```bash
-ssh dosnap@<controller-ip>
+doctl compute droplet create do-snap-bot-controller \
+  --image ubuntu-22-04-x64 \
+  --size s-1vcpu-1gb \
+  --region nyc1 \
+  --ssh-keys <your-key-id> \
+  --user-data-file slack-bot/cloud-init/controller.yml \
+  --wait
+```
+
+Adjust `--region` to match your other droplets. `--wait` blocks until the droplet is active and prints the IP.
+
+Verify cloud-init completed:
+
+```bash
+ssh -i ~/.ssh/id_m3do root@<controller-ip> "cloud-init status"
+```
+
+Should print `status: done`. Then verify the `dosnap` user exists:
+
+```bash
+ssh -i ~/.ssh/id_m3do dosnap@<controller-ip>
+```
+
+Once in, verify tools are installed:
+
+```bash
 doctl version
 op --version
 uv --version
@@ -126,13 +144,21 @@ uv --version
 From your **local machine**:
 
 ```bash
-rsync -av slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
+rsync -av -e "ssh -i ~/.ssh/id_m3do" slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
 ```
+
+If rsync fails with `Permission denied` on `/opt/do-snap-bot`, fix the ownership as root first:
+
+```bash
+ssh -i ~/.ssh/id_m3do root@<controller-ip> "mkdir -p /opt/do-snap-bot && chown dosnap:dosnap /opt/do-snap-bot"
+```
+
+Then retry the rsync.
 
 On the **controller**:
 
 ```bash
-ssh dosnap@<controller-ip>
+ssh -i ~/.ssh/id_m3do dosnap@<controller-ip>
 cd /opt/do-snap-bot
 cp .env.op.example .env.op
 ```
@@ -164,10 +190,10 @@ You should see `⚡️ Bolt app is running!` within a few seconds.
 
 ```bash
 # Service is running
-ssh dosnap@<controller-ip> sudo systemctl status do-snap-bot
+ssh -i ~/.ssh/id_m3do dosnap@<controller-ip> sudo systemctl status do-snap-bot
 
 # Tail logs in a second terminal during testing
-ssh dosnap@<controller-ip> sudo journalctl -u do-snap-bot -f
+ssh -i ~/.ssh/id_m3do dosnap@<controller-ip> sudo journalctl -u do-snap-bot -f
 ```
 
 ### 6.2 Test `/do-snapshot`
@@ -218,7 +244,7 @@ To deploy an update:
 
 ```bash
 # Local machine:
-rsync -av slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
+rsync -av -e "ssh -i ~/.ssh/id_m3do" slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
 
 # Controller:
 sudo systemctl restart do-snap-bot

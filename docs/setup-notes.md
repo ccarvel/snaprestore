@@ -41,6 +41,62 @@ Log in as root first, make the change, then test the non-root login.
 
 ---
 
+## Controller droplet provisioning
+
+### Non-ASCII characters in `controller.yml` break cloud-init silently
+
+The `controller.yml` cloud-config must contain only plain ASCII characters. Em dashes (`—`) and box-drawing characters (`─`) in YAML comments cause cloud-init to log `unacceptable character #x0080` and skip the entire config — no users are created, no packages installed, no services configured. `cloud-init status` still reports `done`.
+
+Check for non-ASCII before creating the droplet:
+
+```bash
+LC_ALL=C grep -n '[^ -~]' slack-bot/cloud-init/controller.yml
+```
+
+No output means the file is clean.
+
+### Use `doctl --user-data-file` instead of the DO console
+
+Pasting `controller.yml` into the DigitalOcean console UI can introduce invisible non-ASCII characters (the browser or OS clipboard encoding can corrupt long base64 strings or Unicode characters in comments). Always pass the file directly:
+
+```bash
+doctl compute droplet create do-snap-bot-controller \
+  --image ubuntu-22-04-x64 \
+  --size s-1vcpu-1gb \
+  --region nyc1 \
+  --ssh-keys <key-id> \
+  --user-data-file slack-bot/cloud-init/controller.yml \
+  --wait
+```
+
+Get your key ID with `doctl compute ssh-key list`.
+
+### Verify cloud-init before expecting `dosnap` to exist
+
+```bash
+ssh -i ~/.ssh/id_m3do root@<controller-ip> "cloud-init status"
+# Must print: status: done
+ssh -i ~/.ssh/id_m3do dosnap@<controller-ip>
+# If this fails, dosnap was not created — check the log above
+```
+
+### `/opt/do-snap-bot` permission denied on rsync
+
+If cloud-init ran but the directory wasn't created or chowned, fix it as root before rsync:
+
+```bash
+ssh -i ~/.ssh/id_m3do root@<controller-ip> "mkdir -p /opt/do-snap-bot && chown dosnap:dosnap /opt/do-snap-bot"
+```
+
+### Destroying and recreating a failed droplet
+
+```bash
+doctl compute droplet delete do-snap-bot-controller
+# Then recreate with the corrected controller.yml
+```
+
+---
+
 ## Running the scripts with `op run`
 
 **Do not use `op run --env-file=.env` to invoke `do-restore.sh` or
