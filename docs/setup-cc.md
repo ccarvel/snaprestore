@@ -53,31 +53,40 @@ You need at minimum one API token. For production, create separate tokens — on
 
 **`do-snapshot.sh` requires:**
 
-| Resource | Permissions |
-|----------|-------------|
-| Droplet | read, delete |
-| Droplet Action | create |
-| Snapshot | read |
-| Reserved IP | read |
+| Scope | Description |
+|-------|-------------|
+| `droplet:read` | List and view droplets |
+| `droplet:update` | Power off droplet; trigger snapshot via Droplet Actions API |
+| `droplet:delete` | Delete droplet after snapshot (if chosen) |
+| `snapshot:read` | List and inspect snapshots |
+| `snapshot:delete` | Prune old snapshots |
+| `reserved_ip:read` | Read reserved IP assignments |
 
 **`do-restore.sh` requires:**
 
-| Resource | Permissions |
-|----------|-------------|
-| Droplet | read, create |
-| Droplet Action | create |
-| Snapshot | read |
-| SSH Key | read |
-| Reserved IP | read, update |
+| Scope | Description |
+|-------|-------------|
+| `droplet:read` | List droplets |
+| `droplet:create` | Create a new droplet from snapshot |
+| `snapshot:read` | List and select snapshots |
+| `ssh_key:read` | List SSH keys to attach at creation |
+| `reserved_ip:read` | List reserved IPs |
+| `reserved_ip:update` | Assign reserved IP to the restored droplet |
 
 **Slack bot token (create a separate token named e.g., `snaprestore-bot`):**
 
-| Resource | Permissions |
-|----------|-------------|
-| Droplet | read, create, delete |
-| Droplet Action | create |
-| Snapshot | read |
-| Reserved IP | read, update |
+| Scope | Description |
+|-------|-------------|
+| `droplet:read` | List and view droplets |
+| `droplet:create` | Create droplets from snapshots |
+| `droplet:update` | Power off droplet; trigger snapshot |
+| `droplet:delete` | Delete droplets |
+| `snapshot:read` | List and inspect snapshots |
+| `snapshot:delete` | Prune old snapshots |
+| `reserved_ip:read` | List reserved IPs |
+| `reserved_ip:update` | Assign reserved IP to restored droplet |
+
+> **Note — “Droplet Action” scope no longer exists.** DigitalOcean’s current custom scopes system (GA’d 2024) uses granular CRUD scopes per resource type. There is no separate “Droplet Action” entry in the token dashboard. Snapshot creation is triggered via the Droplet Actions API endpoint and is covered by **`droplet:update`**. The full scopes reference is at [docs.digitalocean.com/reference/api/scopes](https://docs.digitalocean.com/reference/api/scopes/).
 
 5. Click **Generate Token** and copy the value — **it is shown only once**. Store it in 1Password immediately (see Part 3).
 
