@@ -257,7 +257,7 @@ if [[ "$DRY_RUN" == true ]]; then
 else
   local_tmpfile=$(mktemp)
   SNAP_START=$(date +%s)
-  SNAP_ETA=$(get_eta "snapshot" "$DROPLET_DISK")
+  SNAP_ETA=$(get_eta "snapshot" "$DROPLET_DISK") || true
 
   ui_spinner_start "Creating snapshot '$SNAPSHOT_NAME'" "$SNAP_ETA"
 

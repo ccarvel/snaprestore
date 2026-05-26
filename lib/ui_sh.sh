@@ -106,7 +106,7 @@ get_eta() {
   local action="$1" disk_gb="${2:-}"
   [[ ! -f "$_HISTORY" ]] && {
     [[ -n "$disk_gb" && "$action" == "snapshot" ]] && echo $(( disk_gb * 12 ))
-    return
+    return 0
   }
   local sum=0 count=0
   while IFS= read -r line; do

@@ -341,7 +341,7 @@ if [[ "$DRY_RUN" == true ]]; then
 else
   local_tmpfile=$(mktemp)
   CREATE_START=$(date +%s)
-  CREATE_ETA=$(get_eta "restore")
+  CREATE_ETA=$(get_eta "restore") || true
 
   ui_spinner_start "Creating droplet from snapshot" "$CREATE_ETA"
 
