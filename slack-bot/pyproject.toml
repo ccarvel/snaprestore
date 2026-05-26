@@ -1,0 +1,11 @@
+[project]
+name = "do-snap-bot"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "slack-bolt>=1.19",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+dev-dependencies = []

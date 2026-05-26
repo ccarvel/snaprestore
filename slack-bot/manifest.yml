@@ -1,0 +1,37 @@
+display_information:
+  name: DO Snap Bot
+  description: DigitalOcean snapshot and restore operations from Slack
+  background_color: "#0080FF"
+
+features:
+  bot_user:
+    display_name: DO Snap Bot
+    always_online: true
+  slash_commands:
+    - command: /do-snapshot
+      description: Snapshot a DigitalOcean droplet (shuts it down first)
+      usage_hint: "[droplet-name-or-id]"
+      should_escape: false
+    - command: /do-restore
+      description: Restore a droplet from a snapshot
+      usage_hint: "[snapshot-id-or-name]"
+      should_escape: false
+    - command: /do-deploy-cancel
+      description: Cancel a running snapshot or restore job
+      usage_hint: "<job-id>"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - chat:write.public
+      - commands
+      - users:read
+
+settings:
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+  org_deploy_enabled: false
+  interactivity:
+    is_enabled: false

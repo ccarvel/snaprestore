@@ -508,6 +508,154 @@ brew install fzf
 
 ---
 
+## Slack Bot (`slack-bot/`)
+
+Trigger snapshot and restore operations from Slack using slash commands. Runs as a Python Slack Bolt app in Socket Mode on a dedicated $6/mo DigitalOcean controller droplet.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/do-snapshot [name-or-id]` | Snapshot a droplet (shuts it down first). Prompts if multiple droplets exist. |
+| `/do-restore [snap-id-or-name]` | Create a droplet from a snapshot. Lists recent snapshots if no argument given. |
+| `/do-deploy-cancel <job-id>` | Cancel a running snapshot or restore job by job ID. |
+
+All operations run asynchronously and post status updates in a Slack thread. Long-running steps (shutdown, snapshot creation, droplet creation) post elapsed-time heartbeats every 2 minutes.
+
+### Architecture
+
+- **Slack Bolt Python** (`slack-bolt>=1.19`) with **Socket Mode** — no public ingress required, no HTTP port to expose
+- **1Password service account** — the only secret on disk is `OP_SERVICE_ACCOUNT_TOKEN` in `/etc/do-snap-bot/env` (mode 0600); all other secrets (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `DIGITALOCEAN_ACCESS_TOKEN`, `SLACK_ALLOWED_USERS`) are resolved at runtime via `op run`
+- **Allow-list** — `SLACK_ALLOWED_USERS` (comma-separated Slack user IDs) gates all commands; empty = allow all (not recommended)
+- **Request authentication** — Bolt verifies Slack's `X-Slack-Signature` HMAC on every event automatically
+
+### Secrets — 1Password vault paths
+
+Store these in 1Password before deploying. The paths below match `slack-bot/.env.op.example`:
+
+| Secret | 1Password path |
+|--------|---------------|
+| Slack bot token (`xoxb-…`) | `op://Private/do-snap-bot/slack-bot-token` |
+| Slack app-level token (`xapp-…`) | `op://Private/do-snap-bot/slack-app-token` |
+| Slack signing secret | `op://Private/do-snap-bot/signing-secret` |
+| DigitalOcean API token | `op://Private/do-snap-bot/do-token` |
+| Allowed user IDs | `op://Private/do-snap-bot/allowed-users` |
+
+**WARNING:** Never write raw tokens to `.env.op`, commit files with secrets, or store tokens in shell history.
+
+### Required token scopes
+
+Create a custom-scoped token for the bot's DO token:
+
+| Resource | Permissions |
+|----------|-------------|
+| Droplet | read, create, delete |
+| Droplet Action | create |
+| Snapshot | read |
+| Reserved IP | read, update |
+
+For the Slack app, the manifest at `slack-bot/manifest.yml` declares the required OAuth scopes (`chat:write`, `chat:write.public`, `commands`, `users:read`).
+
+### Setup
+
+#### 1. Create the Slack app
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
+2. Paste the contents of `slack-bot/manifest.yml`
+3. Under **Settings → Socket Mode**, enable Socket Mode and generate an **App-Level Token** with scope `connections:write` — this is your `SLACK_APP_TOKEN` (`xapp-…`)
+4. Under **OAuth & Permissions**, install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-…`) — this is your `SLACK_BOT_TOKEN`
+5. Under **Basic Information**, copy the **Signing Secret** — this is your `SLACK_SIGNING_SECRET`
+
+#### 2. Store secrets in 1Password
+
+```bash
+# Create the vault item (do this once per secret)
+op item create --category login --title "do-snap-bot" --vault Private \
+  "slack-bot-token=xoxb-..." \
+  "slack-app-token=xapp-..." \
+  "signing-secret=..." \
+  "do-token=dop_v1_..." \
+  "allowed-users=U01AB2CD3,U04XY5EF6"
+```
+
+#### 3. Create a 1Password service account
+
+1. In 1Password.com → **Developer** → **Service Accounts** → **New Service Account**
+2. Grant read access to the `Private` vault (or a dedicated vault)
+3. Copy the service account token — this is `OP_SERVICE_ACCOUNT_TOKEN`
+
+#### 4. Launch the controller droplet
+
+Create a new $6/mo DigitalOcean droplet (Debian/Ubuntu, 1 vCPU, 1 GB RAM, the region of your choice):
+
+```
+User Data: paste contents of slack-bot/cloud-init/controller.yml
+           (after replacing <YOUR_SSH_PUBLIC_KEY> and <OP_SERVICE_ACCOUNT_TOKEN>)
+```
+
+Wait ~3 minutes for cloud-init to finish.
+
+#### 5. Deploy the bot
+
+```bash
+# From your local machine:
+rsync -av slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
+
+# On the controller:
+ssh dosnap@<controller-ip>
+cd /opt/do-snap-bot
+cp .env.op.example .env.op
+# Verify op:// paths match what you created in step 2
+systemctl start do-snap-bot
+journalctl -u do-snap-bot -f
+```
+
+You should see `⚡️ Bolt app is running!` in the logs.
+
+#### 6. Verify
+
+In Slack, type `/do-snapshot` — the bot should respond with a list of droplets (or a message if none exist).
+
+### Running locally (development)
+
+```bash
+cd slack-bot
+cp .env.op.example .env.op
+# Edit .env.op if your op:// paths differ
+
+# Requires: op CLI signed in, uv installed
+./start.sh
+```
+
+Or without 1Password:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_APP_TOKEN=xapp-...
+export SLACK_SIGNING_SECRET=...
+export DIGITALOCEAN_ACCESS_TOKEN=dop_v1_...
+export SLACK_ALLOWED_USERS=U01AB2CD3
+cd slack-bot
+uv run python bot.py
+```
+
+### File structure
+
+```
+slack-bot/
+├── bot.py                    # Slack Bolt async app (Socket Mode)
+├── pyproject.toml            # Python dependencies (slack-bolt, httpx)
+├── manifest.yml              # Slack app manifest (paste at api.slack.com)
+├── .env.op.example           # 1Password op:// reference template
+├── start.sh                  # op run wrapper to launch the bot
+├── systemd/
+│   └── do-snap-bot.service   # systemd unit (deployed by cloud-init)
+└── cloud-init/
+    └── controller.yml        # Cloud-init for controller droplet provisioning
+```
+
+---
+
 ## License
 
 MIT — use freely.
