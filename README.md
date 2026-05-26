@@ -2,7 +2,7 @@
 
 Two companion scripts for managing DigitalOcean droplet snapshots: create a snapshot from a running droplet, then restore a new droplet from that snapshot. Designed for cost-effective on-demand usage — snapshot and delete when idle, restore when needed, with the same reserved IP so DNS and Cloudflare configs remain valid.
 
-**Full setup guide (new users start here):** [`docs/setup-cc.md`](docs/setup-cc.md)
+**Full setup guide (new users start here):** [`docs/setup.md`](docs/setup.md)
 
 ## Scripts
 
@@ -642,7 +642,7 @@ snaprestore/
 ├── do-restore.sh             # Restore a droplet from snapshot + assign reserved IP
 ├── .env.example              # Environment variable reference with op:// examples (tracked)
 ├── docs/
-│   └── setup-cc.md           # Complete setup guide (DO tokens, doctl, 1Password, Slack bot)
+│   └── setup.md              # Complete setup guide (DO tokens, doctl, 1Password, Slack bot)
 ├── lib/
 │   ├── bootstrap_sh.sh       # UI bootstrap (gum detection, dependency checks)
 │   ├── ui_sh.sh              # Shell UI primitives (spinner, panel, choose, confirm)

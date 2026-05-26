@@ -1,6 +1,6 @@
 # Setup Notes — Operator Observations
 
-Field notes from working through `docs/setup-cc.md`. Captures gotchas,
+Field notes from working through `docs/setup.md`. Captures gotchas,
 clarifications, and post-restore steps not fully covered in the main doc.
 
 ---

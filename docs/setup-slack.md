@@ -1,6 +1,6 @@
 # Slack Bot Setup & Testing
 
-Assumes **`docs/setup-cc.md` Parts 1–3** are complete (DO API token, doctl context, 1Password CLI signed in).
+Assumes **`docs/setup.md` Parts 1–3** are complete (DO API token, doctl context, 1Password CLI signed in).
 
 ---
 
