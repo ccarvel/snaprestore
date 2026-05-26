@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eo pipefail
 
 #-----------------------------------------
@@ -52,9 +52,11 @@ done
 
 # ── logging ───────────────────────────────────────────────────────────────────
 
+_TEE_PID=""
 if [[ -n "$LOG_FILE" ]]; then
   mkdir -p "$(dirname "$LOG_FILE")"
   exec > >(tee -a "$LOG_FILE") 2>&1
+  _TEE_PID=$!
 fi
 
 # ── bootstrap + UI layer ──────────────────────────────────────────────────────
@@ -80,6 +82,8 @@ cleanup() {
     [[ -n "$NEW_DROPLET_ID" ]] && ui_warn "Partially provisioned droplet ID: $NEW_DROPLET_ID — check console"
     ui_warn "Check console: https://cloud.digitalocean.com/droplets"
   fi
+  # wait for tee to drain before the process exits
+  [[ -n "$_TEE_PID" ]] && wait "$_TEE_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -221,7 +225,7 @@ if [[ -z "$SIZE_SLUG" ]]; then
     echo "$SIZES_JSON" | jq -r \
       --arg region "$SNAPSHOT_REGION" \
       --argjson min_disk "$SNAPSHOT_MIN_DISK" \
-      '.[] | select(.available==true) | select(.regions[] == $region) | select(.disk >= $min_disk) |
+      '.[] | select(.available==true) | select(any(.regions[]?; . == $region)) | select(.disk >= $min_disk) |
        "\(.slug)|\(.vcpus)vCPU|\(.memory)MB|\(.disk)GB disk|$\(.price_monthly)/mo"' | \
       sort -t'$' -k2 -n
   )
@@ -310,7 +314,8 @@ ui_panel "Creating Droplet" \
   "Reserved IP" "${RESERVED_IP:-(none)}" \
   "Tags"        "${TAGS:-(none)}"
 
-ui_confirm "Proceed?" || { ui_info "Aborted."; exit 0; }
+ui_confirm "Proceed?" || { echo "[restore] user aborted at Proceed prompt" >&2; ui_info "Aborted."; exit 0; }
+echo "[restore] user confirmed — starting droplet creation"
 
 # ── build doctl create args ───────────────────────────────────────────────────
 
