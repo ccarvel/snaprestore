@@ -1,6 +1,25 @@
 # AI Work Log
 
 ---
+## 2026-05-26 — Session 2 (Antigravity)
+**Focus:** Provide testing setup documentation for Slack integration.
+### Files changed
+| File | Action | Commit |
+|------|--------|--------|
+| `docs/setup-agy.md` | Create | `f812599` |
+| `prompt-agy.md` | Rename to `docs/prompt-agy.md` | `f812599` |
+### Commands run
+- `git checkout next-agy`
+- `mv prompt-agy.md docs/`
+- `git commit`, `git push`
+### Validations
+- name: not run
+### Outcome
+Created comprehensive documentation for setting up the Slack integration and migrating scripts to test environment. Moved old prompt file to docs directory and pushed all changes to `next-agy`.
+### Next step
+User to review `docs/setup-agy.md` and test the Slack integration.
+
+---
 ## 2026-05-26 — Session 1 (Antigravity)
 **Focus:** Full overhaul of snaprestore scripts (Phase 4-6) including doctl migration, UI polish, and Slack integration.
 ### Files changed
