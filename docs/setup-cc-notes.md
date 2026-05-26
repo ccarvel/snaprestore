@@ -38,3 +38,25 @@ Options (pick one):
    consulted.
 
 Log in as root first, make the change, then test the non-root login.
+
+---
+
+## Running the scripts with `op run`
+
+**Do not use `op run --env-file=.env` to invoke `do-restore.sh` or
+`do-snapshot.sh` directly.** When `op run` injects `DIGITALOCEAN_ACCESS_TOKEN`
+from `.env` into the environment, doctl ignores `--context snaprestore` and
+uses that injected token instead of the context's stored credential. If the
+`.env` token belongs to a different API key (e.g. the Slack bot token), the
+wizard reads will succeed but droplet create/snapshot calls will fail silently.
+
+The scripts authenticate via the named doctl context (`snaprestore`). Run them
+without `op run`:
+
+```bash
+./do-restore.sh --log restore.log
+./do-snapshot.sh --log snapshot.log
+```
+
+`op run` is correct for the Slack bot and any service that reads
+`DIGITALOCEAN_ACCESS_TOKEN` directly from the environment.

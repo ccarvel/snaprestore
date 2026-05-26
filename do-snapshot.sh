@@ -7,7 +7,7 @@ set -eo pipefail
 DROPLET_ID=""       # Droplet ID, or leave blank for interactive selection
 SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{YYYYMMDD-HHMM}
 OP_ITEM=""          # Optional: 1Password path, e.g. op://Private/DigitalOcean/token
-DOCTL_CONTEXT="default"    # doctl auth context name (doctl auth list to see yours)
+DOCTL_CONTEXT="snaprestore"    # doctl auth context name (doctl auth list to see yours)
 #-----------------------------------------
 
 # ── flag parsing ──────────────────────────────────────────────────────────────
@@ -107,9 +107,16 @@ load_token() {
       ui_warn "'op' CLI not found — falling back to env var"
     fi
   fi
+  # When a named doctl context is configured and no OP_ITEM override is set,
+  # unset any ambient env-var token (e.g. injected by `op run`) so doctl uses
+  # the context's own stored credential instead of the injected one.
+  if [[ -n "$DOCTL_CONTEXT" && -z "$token" ]]; then
+    unset DIGITALOCEAN_ACCESS_TOKEN
+    return 0
+  fi
   [[ -z "$token" && -n "$DIGITALOCEAN_ACCESS_TOKEN" ]] && token="$DIGITALOCEAN_ACCESS_TOKEN"
   [[ -z "$token" && -n "$DO_API_TOKEN" ]]              && token="$DO_API_TOKEN"
-  if [[ -z "$token" && -z "$DOCTL_CONTEXT" ]]; then
+  if [[ -z "$token" ]]; then
     token=$(ui_input_secret "DigitalOcean API Token")
     [[ -z "$token" ]] && { ui_err "Token required."; exit 1; }
   fi
