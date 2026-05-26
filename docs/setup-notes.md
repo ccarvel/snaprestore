@@ -41,6 +41,24 @@ Log in as root first, make the change, then test the non-root login.
 
 ---
 
+## 1Password service accounts
+
+### Service account must be created in an account you fully control
+
+The controller droplet authenticates to 1Password using a service account token (`OP_SERVICE_ACCOUNT_TOKEN`). Service accounts must be created and vault access must be granted by the account owner.
+
+**If your 1Password account is managed by an organization (e.g. a university IT department), you may not be able to create service accounts or assign vault access yourself.** In that case, use a personal 1Password account where you have full admin control:
+
+1. Create a vault in your personal 1Password account
+2. Re-add all `do-snap-bot` secrets to that vault
+3. Go to **Developer** → **Service Accounts** → **New Service Account**
+4. Grant the service account **read** access to the new vault
+5. Update all `op://VaultName/` references in the project to match the new vault name
+
+The vault name used in `op://` paths, `--vault` flags, and `.env.op` must exactly match the vault name in the account the service account belongs to.
+
+---
+
 ## Controller droplet provisioning
 
 ### Non-ASCII characters in `controller.yml` break cloud-init silently
