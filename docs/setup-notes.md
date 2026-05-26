@@ -88,6 +88,19 @@ If cloud-init ran but the directory wasn't created or chowned, fix it as root be
 ssh -i ~/.ssh/id_m3do root@<controller-ip> "mkdir -p /opt/do-snap-bot && chown dosnap:dosnap /opt/do-snap-bot"
 ```
 
+### `uv` not found when starting the bot service
+
+The original cloud-init installed `uv` to `/root/.local/bin/` and symlinked it to `/usr/local/bin/uv`. The symlink is unreadable by the `dosnap` user because it points inside root's home directory, so `start.sh` exits with `ERROR: uv not found`.
+
+Fix on an existing droplet:
+
+```bash
+ssh -i ~/.ssh/id_m3do root@<controller-ip> \
+  "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh"
+```
+
+The `controller.yml` cloud-init has been updated to install directly to `/usr/local/bin` on new droplets.
+
 ### Destroying and recreating a failed droplet
 
 ```bash
