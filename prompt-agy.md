@@ -7,7 +7,7 @@ The user runs four DigitalOcean droplets supporting Brown University Library dig
 </project_context>
 
 <phase_0_new_branch>
-0) First thing: if branch 'next-agy' does not exist, create a new branch, 'next-agy'--All work: updates, additions, etc. take place on this branch.
+0) All work: updates, additions, etc. take place on branch, 'next-agy'
 </phase_0_new_branch>
 
 <files_to_audit>
