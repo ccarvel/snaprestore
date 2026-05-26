@@ -25,6 +25,10 @@ JSON_OUTPUT=0
 VERBOSE=0
 QUIET=0
 HAS_FZF="no"
+HAS_GUM="no"
+UI_MODE="auto"
+NO_INSTALL=0
+USE_COLOR=1
 DOCTL_ARGS=()
 FINAL_JSON="{}"
 RESERVED_IPS_JSON=""
@@ -40,6 +44,9 @@ Options:
   --verbose             Print extra operational detail.
   --quiet               Suppress non-error progress output.
   --log-file PATH       Append redacted run logs to PATH.
+  --ui auto|gum|fzf|plain
+                       Choose UI mode. Default: auto.
+  --no-install          Do not offer to install optional UI tools.
   --help                Show this help text.
 
 Config variables still supported:
@@ -57,6 +64,15 @@ while [ "$#" -gt 0 ]; do
     --json) JSON_OUTPUT=1 ;;
     --verbose) VERBOSE=1 ;;
     --quiet) QUIET=1 ;;
+    --ui)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "ERROR: --ui requires auto, gum, fzf, or plain" >&2
+        exit 2
+      fi
+      UI_MODE="$1"
+      ;;
+    --no-install) NO_INSTALL=1 ;;
     --log-file)
       shift
       if [ "$#" -eq 0 ]; then
@@ -78,6 +94,18 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+case "$UI_MODE" in
+  auto|gum|fzf|plain) ;;
+  *)
+    echo "ERROR: --ui must be auto, gum, fzf, or plain" >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+  USE_COLOR=0
+fi
+
 log_line() {
   if [ -n "$LOG_FILE" ]; then
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -92,6 +120,29 @@ say() {
   log_line "$*"
 }
 
+paint() {
+  local code="$1"
+  shift
+  if [ "$USE_COLOR" -eq 1 ]; then
+    printf '\033[%sm%s\033[0m' "$code" "$*"
+  else
+    printf '%s' "$*"
+  fi
+}
+
+status_line() {
+  local level="$1"
+  shift
+  local message="$*"
+  case "$level" in
+    INFO) say "$(paint 36 INFO)  $message" ;;
+    OK) say "$(paint 32 OK)    $message" ;;
+    WARN) warn "$message" ;;
+    ERROR) die "$message" ;;
+    *) say "$level  $message" ;;
+  esac
+}
+
 verbose() {
   if [ "$VERBOSE" -eq 1 ]; then
     say "$*"
@@ -101,6 +152,35 @@ verbose() {
 warn() {
   printf 'WARN: %s\n' "$*" >&2
   log_line "WARN: $*"
+}
+
+banner() {
+  if [ "$QUIET" -eq 1 ]; then
+    return 0
+  fi
+  if [ "$HAS_GUM" = "yes" ]; then
+    gum style --border normal --padding "0 2" --width 76 --align center \
+      "SNAPRESTORE" "DigitalOcean Restore"
+  else
+    say "============================== SNAPRESTORE =============================="
+    say "DigitalOcean Restore"
+    say "========================================================================="
+  fi
+}
+
+summary_panel() {
+  local body="$1"
+  if [ "$QUIET" -eq 1 ]; then
+    return 0
+  fi
+  if [ "$HAS_GUM" = "yes" ]; then
+    printf '%s\n' "$body" | gum style --border rounded --padding "1 2" --width 76
+  else
+    say "------------------------------- Summary ---------------------------------"
+    printf '%s\n' "$body"
+    log_line "$body"
+    say "-------------------------------------------------------------------------"
+  fi
 }
 
 die() {
@@ -158,6 +238,63 @@ doctl_text() {
   doctl "${DOCTL_ARGS[@]}" "$@"
 }
 
+ensure_ui() {
+  if command -v fzf >/dev/null 2>&1; then
+    HAS_FZF="yes"
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    HAS_GUM="yes"
+  elif { [ "$UI_MODE" = "auto" ] || [ "$UI_MODE" = "gum" ]; } &&
+    [ "$NO_INSTALL" -eq 0 ] && [ -t 0 ] && [ -t 1 ] &&
+    command -v brew >/dev/null 2>&1; then
+    printf 'gum is not installed. Install it with Homebrew now? (y/n): ' >&2
+    IFS= read -r INSTALL_GUM || INSTALL_GUM="n"
+    if [ "$INSTALL_GUM" = "y" ] || [ "$INSTALL_GUM" = "Y" ]; then
+      if brew install gum; then
+        HAS_GUM="yes"
+      else
+        warn "gum install failed; continuing with fallback UI."
+      fi
+    fi
+  fi
+
+  if [ "$UI_MODE" = "gum" ] && [ "$HAS_GUM" != "yes" ]; then
+    warn "gum UI requested but gum is unavailable; falling back."
+  fi
+  if [ "$UI_MODE" = "plain" ]; then
+    HAS_GUM="no"
+    HAS_FZF="no"
+  elif [ "$UI_MODE" = "fzf" ]; then
+    HAS_GUM="no"
+  fi
+}
+
+confirm_yes() {
+  local prompt="$1"
+  if [ "$HAS_GUM" = "yes" ]; then
+    if gum confirm "$prompt"; then
+      return 0
+    fi
+    return 1
+  fi
+  local answer=""
+  printf '%s (y/n): ' "$prompt" >&2
+  IFS= read -r answer || die "Confirmation cancelled"
+  [ "$answer" = "y" ] || [ "$answer" = "Y" ]
+}
+
+run_with_spinner() {
+  local label="$1"
+  shift
+  if [ "$HAS_GUM" = "yes" ] && [ "$QUIET" -eq 0 ]; then
+    gum spin --spinner dot --title "$label" -- "$@"
+  else
+    status_line INFO "$label"
+    "$@"
+  fi
+}
+
 select_option() {
   local prompt="$1"
   shift
@@ -170,8 +307,17 @@ select_option() {
     return 1
   fi
 
+  if [ "$HAS_GUM" = "yes" ]; then
+    selected="$(printf '%s\n' "${options[@]}" | gum choose --height 15 --header "$prompt" || true)"
+    if [ -z "$selected" ]; then
+      die "Selection cancelled"
+    fi
+    printf '%s\n' "$selected"
+    return 0
+  fi
+
   if [ "$HAS_FZF" = "yes" ]; then
-    selected="$(printf '%s\n' "${options[@]}" | fzf --height=15 --prompt="$prompt " || true)"
+    selected="$(printf '%s\n' "${options[@]}" | fzf --height=15 --border --header="$prompt" --prompt="> " || true)"
     if [ -z "$selected" ]; then
       die "Selection cancelled"
     fi
@@ -300,9 +446,8 @@ wait_for_reserved_ip_action() {
 
 require_command doctl
 require_command jq
-if command -v fzf >/dev/null 2>&1; then
-  HAS_FZF="yes"
-fi
+ensure_ui
+banner
 
 load_token
 
@@ -331,7 +476,7 @@ if [ "$SIZE_SLUG_LOWER" = "list" ] || [ "$SIZE_SLUG_LOWER" = "get" ]; then
   fi
 fi
 
-say "Fetching snapshots..."
+status_line INFO "Fetching snapshots..."
 SNAPSHOTS_JSON="$(doctl_json compute snapshot list --resource droplet)"
 
 if [ -z "$SNAPSHOT_ID" ]; then
@@ -396,7 +541,7 @@ if [ "$SIZE_SLUG_LOWER" = "list" ] || [ "$SIZE_SLUG_LOWER" = "get" ]; then
 fi
 
 say ""
-say "Fetching droplet sizes..."
+status_line INFO "Fetching droplet sizes..."
 SIZES_JSON="$(doctl_json compute size list)"
 
 if [ -z "$SIZE_SLUG" ]; then
@@ -415,10 +560,8 @@ fi
 say "Selected size: $SIZE_SLUG"
 
 if [ -z "$SSH_KEY_ID" ]; then
-  printf 'Does this droplet require SSH keys? (y/n): ' >&2
-  IFS= read -r NEED_SSH_KEY || die "SSH key prompt cancelled"
-  if [ "$NEED_SSH_KEY" = "y" ] || [ "$NEED_SSH_KEY" = "Y" ]; then
-    say "Fetching SSH keys..."
+  if confirm_yes "Does this droplet require SSH keys?"; then
+    status_line INFO "Fetching SSH keys..."
     KEYS_JSON="$(doctl_json compute ssh-key list)"
     KEY_OPTIONS=()
     while IFS= read -r line; do
@@ -440,10 +583,8 @@ else
 fi
 
 if [ -z "$RESERVED_IP" ]; then
-  printf 'Assign a reserved IP? (y/n): ' >&2
-  IFS= read -r NEED_RESERVED_IP || die "Reserved IP prompt cancelled"
-  if [ "$NEED_RESERVED_IP" = "y" ] || [ "$NEED_RESERVED_IP" = "Y" ]; then
-    say "Fetching reserved IPs..."
+  if confirm_yes "Assign a reserved IP?"; then
+    status_line INFO "Fetching reserved IPs..."
     RESERVED_IPS_JSON="$(doctl_json compute reserved-ip list)"
     IP_OPTIONS=()
     while IFS= read -r line; do
@@ -482,9 +623,7 @@ if [ -n "$RESERVED_IP" ]; then
 fi
 
 if [ -z "$VPC_UUID" ]; then
-  printf 'Select a non-default VPC? (y/n): ' >&2
-  IFS= read -r NEED_VPC || die "VPC prompt cancelled"
-  if [ "$NEED_VPC" = "y" ] || [ "$NEED_VPC" = "Y" ]; then
+  if confirm_yes "Select a non-default VPC?"; then
     VPCS_JSON="$(doctl_json vpcs list)"
     VPC_OPTIONS=()
     while IFS= read -r line; do
@@ -517,8 +656,12 @@ fi
 if [ -z "$DROPLET_NAME" ]; then
   SAFE_SNAPSHOT_NAME="$(printf '%s' "$SNAPSHOT_NAME" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')"
   DEFAULT_NAME="restored-${SAFE_SNAPSHOT_NAME}-$(date +%Y%m%d)"
-  printf 'Droplet name [%s]: ' "$DEFAULT_NAME" >&2
-  IFS= read -r DROPLET_NAME || die "Droplet name prompt cancelled"
+  if [ "$HAS_GUM" = "yes" ]; then
+    DROPLET_NAME="$(gum input --placeholder "$DEFAULT_NAME" --prompt "Droplet name: " || true)"
+  else
+    printf 'Droplet name [%s]: ' "$DEFAULT_NAME" >&2
+    IFS= read -r DROPLET_NAME || die "Droplet name prompt cancelled"
+  fi
   DROPLET_NAME="${DROPLET_NAME:-$DEFAULT_NAME}"
 fi
 
@@ -539,9 +682,7 @@ say "  Tags: ${TAGS_CSV:-none}"
 say "  VPC UUID: ${VPC_UUID:-default}"
 say "  User data file: ${USER_DATA_FILE:-none}"
 say "========================================"
-printf 'Proceed? (y/n): ' >&2
-IFS= read -r CONFIRM || die "Confirmation cancelled"
-if [ "$CONFIRM" != "y" ]; then
+if ! confirm_yes "Proceed with restore?"; then
   say "Aborted."
   exit 0
 fi
@@ -565,7 +706,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
   DROPLET_ID="dry-run"
   PUBLIC_IP=""
 else
-  say "Creating droplet and waiting for active status..."
+  status_line INFO "Creating droplet and waiting for active status..."
+  if [ "$HAS_GUM" = "yes" ] && [ "$QUIET" -eq 0 ]; then
+    status_line INFO "Waiting for DigitalOcean droplet create action..."
+  fi
   CREATE_RESPONSE="$(doctl_json "${CREATE_ARGS[@]}")"
   DROPLET_ID="$(printf '%s\n' "$CREATE_RESPONSE" | jq -r '(if type == "array" then .[0] else . end) | .ID // .id // empty')"
   if [ -z "$DROPLET_ID" ]; then
@@ -579,7 +723,7 @@ CONNECT_IP="$PUBLIC_IP"
 ASSIGN_ACTION_ID=""
 if [ -n "$RESERVED_IP" ]; then
   say ""
-  say "Assigning reserved IP $RESERVED_IP to droplet $DROPLET_ID..."
+  status_line INFO "Assigning reserved IP $RESERVED_IP to droplet $DROPLET_ID..."
   if [ "$DRY_RUN" -eq 1 ]; then
     say "DRY RUN: doctl compute reserved-ip-action assign $RESERVED_IP $DROPLET_ID"
     CONNECT_IP="$RESERVED_IP"

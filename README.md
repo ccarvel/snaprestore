@@ -13,7 +13,8 @@ macOS:
 
 ```bash
 brew install doctl jq
-brew install fzf          # optional, nicer selection menus
+brew install gum          # optional, polished terminal UI
+brew install fzf          # optional, enhanced fallback selection menus
 brew install --cask 1password-cli  # optional, token loading from 1Password
 ```
 
@@ -85,6 +86,8 @@ Both scripts support:
 --verbose        # Print extra detail
 --quiet          # Suppress non-error progress output
 --log-file PATH  # Append redacted logs to PATH
+--ui MODE        # auto, gum, fzf, or plain
+--no-install     # Never offer to install optional UI tools
 --help           # Show usage
 ```
 
@@ -95,6 +98,36 @@ Example log path:
 ```
 
 Logs intentionally avoid tokens. They may still contain Droplet names, IDs, IPs, and snapshot names.
+
+## Terminal UI Packaging
+
+Default UI mode is `--ui auto`.
+
+At startup, each script chooses the best available interface:
+
+1. Use `gum` when installed.
+2. If `gum` is missing, the terminal is interactive, Homebrew is available, and `--no-install` is not set, offer to install it:
+
+   ```bash
+   gum is not installed. Install it with Homebrew now? (y/n):
+   ```
+
+3. If `gum` is unavailable or declined, use enhanced `fzf` menus when `fzf` is installed.
+4. If neither `gum` nor `fzf` is available, use numbered plain-bash menus.
+
+The scripts honor `NO_COLOR`. Set it to disable ANSI color:
+
+```bash
+NO_COLOR=1 ./do-restore.sh
+```
+
+For automation, avoid install prompts:
+
+```bash
+./do-restore.sh --no-install --ui plain --json
+```
+
+Docker is intentionally not used for the CLI wrapper. The scripts need native terminal interaction, local `doctl`, optional `op` access, and safe prompt behavior; Docker makes those concerns harder without improving the Droplet workflow.
 
 ## `do-snapshot.sh`
 
@@ -285,7 +318,7 @@ uvx docker-autocompose container_name
 Install the missing command with Homebrew on macOS:
 
 ```bash
-brew install doctl jq fzf
+brew install doctl jq gum fzf
 ```
 
 For 1Password token loading:
