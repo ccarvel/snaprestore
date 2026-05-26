@@ -262,44 +262,12 @@ You will paste this token into `slack-bot/cloud-init/controller.yml` in Part 6.
 
 ---
 
-## Part 4 — Environment File
+## Part 4 — Environment File Reference
 
-### 4.1 Copy the example file
+`.env.example` in the project root is a **reference document only**. It lists every environment variable the project uses and shows the `op://` path format for what should be stored in 1Password. You do not copy or use it directly.
 
-```bash
-cp .env.example .env
-```
-
-`.env` is in `.gitignore` and will never be committed.
-
-### 4.2 Configure op:// references
-
-Open `.env`. Uncomment and verify the lines for the operations you need.
-
-**For the snapshot/restore scripts:**
-
-```bash
-DIGITALOCEAN_ACCESS_TOKEN=op://Private/DigitalOcean API Token/credential
-DOCTL_CONTEXT=snaprestore
-```
-
-**For the Slack bot (after completing Parts 3 and 7):**
-
-```bash
-SLACK_BOT_TOKEN=op://Private/do-snap-bot/slack-bot-token
-SLACK_APP_TOKEN=op://Private/do-snap-bot/slack-app-token
-SLACK_SIGNING_SECRET=op://Private/do-snap-bot/signing-secret
-SLACK_ALLOWED_USERS=op://Private/do-snap-bot/allowed-users
-```
-
-All paths above match the defaults in `.env.example`. If you named your 1Password items differently, update the paths to match.
-
-Run scripts with secret injection:
-
-```bash
-op run --env-file=.env -- ./do-snapshot.sh
-op run --env-file=.env -- ./do-restore.sh
-```
+- **Scripts (`do-restore.sh`, `do-snapshot.sh`)** authenticate via the `snaprestore` doctl context. They do not use `.env` — run them directly (see Part 5).
+- **Slack bot** uses `slack-bot/.env.op` with `op run` (see Part 6). The `op://` paths in that file correspond to the 1Password items you created in Part 3.
 
 ---
 
@@ -326,7 +294,7 @@ RESERVED_IP=list ./do-restore.sh     # list reserved IPs
 ### 5.3 Full snapshot test
 
 ```bash
-op run --env-file=.env -- ./do-snapshot.sh
+./do-snapshot.sh
 ```
 
 1. Select a droplet from the interactive list.
@@ -336,7 +304,7 @@ op run --env-file=.env -- ./do-snapshot.sh
 ### 5.4 Full restore test
 
 ```bash
-op run --env-file=.env -- ./do-restore.sh
+./do-restore.sh
 ```
 
 1. Select a snapshot from the list.
@@ -507,8 +475,8 @@ In your `#do-ops` channel:
 
 | Variable | Where it lives | Description |
 |----------|----------------|-------------|
-| `DIGITALOCEAN_ACCESS_TOKEN` | `.env`, `slack-bot/.env.op` | DigitalOcean API token |
-| `DOCTL_CONTEXT` | `.env`, script config block | doctl auth context name |
+| `DIGITALOCEAN_ACCESS_TOKEN` | `slack-bot/.env.op`, 1Password | DigitalOcean API token (Slack bot only — scripts use doctl context) |
+| `DOCTL_CONTEXT` | Script config block (`snaprestore`) | doctl auth context name |
 | `OP_SERVICE_ACCOUNT_TOKEN` | `/etc/do-snap-bot/env` on controller | 1Password service account token |
 | `SLACK_BOT_TOKEN` | `slack-bot/.env.op` | `xoxb-…` bot user OAuth token |
 | `SLACK_APP_TOKEN` | `slack-bot/.env.op` | `xapp-…` socket mode app token |
@@ -517,8 +485,7 @@ In your `#do-ops` channel:
 
 ### Token loading order (both scripts)
 
+The scripts authenticate via the `snaprestore` doctl context and do not require any environment variables. The full resolution order if you ever override via `OP_ITEM`:
+
 1. `OP_ITEM` config var → calls `op read` if the `op` CLI is present
-2. `DIGITALOCEAN_ACCESS_TOKEN` environment variable
-3. `DO_API_TOKEN` environment variable (legacy fallback)
-4. `DOCTL_CONTEXT` → doctl uses its stored context token (no env var needed)
-5. Interactive prompt — input is hidden (`read -rsp`)
+2. `DOCTL_CONTEXT` → doctl uses its stored context token (default path)
