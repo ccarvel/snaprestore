@@ -9,6 +9,85 @@ Before you begin, ensure you have access to the following:
 2. **Slack Workspace**: Permission to create and install Slack Apps in your workspace.
 3. **AWS Account**: The Slack integration relies on AWS Lambda, API Gateway, and Systems Manager (SSM) to securely trigger the scripts.
 4. **A Runner Server**: An AWS EC2 instance or a DigitalOcean Droplet registered with AWS SSM Hybrid Activations. This machine will execute the bash scripts.
+5. **1Password CLI** (`op`): Strongly recommended for secure secret management. Install with `brew install 1password-cli`. Sign in with `op signin`.
+
+---
+
+## Secret Management with 1Password
+
+All credentials for this project should be stored in 1Password and retrieved via the `op` CLI. This avoids hardcoding secrets in scripts, environment files, or shell profiles.
+
+### Recommended 1Password Vault Structure
+
+Store all SnapRestore secrets under a single vault (e.g., `Private` or a dedicated `SnapRestore` vault) using the following item names and field paths:
+
+| Secret | 1Password Path | `op read` Command |
+|--------|---------------|-------------------|
+| DigitalOcean API Token | `op://Private/DigitalOcean PAT/credential` | `op read "op://Private/DigitalOcean PAT/credential"` |
+| Slack Signing Secret | `op://Private/SnapRestore Slack App/signing_secret` | `op read "op://Private/SnapRestore Slack App/signing_secret"` |
+| AWS SSM Instance ID | `op://Private/SnapRestore Runner/instance_id` | `op read "op://Private/SnapRestore Runner/instance_id"` |
+
+> **Tip**: You can use any vault and item names you prefer — just update the paths consistently across all the commands below.
+
+### Storing Secrets in 1Password
+
+Run these `op` commands once to create the items. You will be prompted to paste the actual secret values.
+
+```bash
+# 1. Store the DigitalOcean Personal Access Token
+op item create \
+  --category login \
+  --title "DigitalOcean PAT" \
+  --vault Private \
+  username="snaprestore" \
+  credential="dop_v1_YOUR_TOKEN_HERE"
+
+# 2. Store the Slack App Signing Secret
+op item create \
+  --category login \
+  --title "SnapRestore Slack App" \
+  --vault Private \
+  username="snaprestore-slack" \
+  signing_secret="YOUR_SLACK_SIGNING_SECRET_HERE"
+
+# 3. Store the AWS SSM Runner Instance ID
+op item create \
+  --category login \
+  --title "SnapRestore Runner" \
+  --vault Private \
+  username="snaprestore-runner" \
+  instance_id="i-0abcdef1234567890"
+```
+
+### Reading Secrets with `op read`
+
+```bash
+# Read the DO token into a variable (never printed to terminal)
+DO_API_TOKEN=$(op read "op://Private/DigitalOcean PAT/credential")
+
+# Read the Slack signing secret
+SLACK_SIGNING_SECRET=$(op read "op://Private/SnapRestore Slack App/signing_secret")
+
+# Read the SSM instance ID
+SSM_INSTANCE_ID=$(op read "op://Private/SnapRestore Runner/instance_id")
+```
+
+### Injecting Secrets into a Shell Session
+
+Use `op run` to inject secrets from a `.env`-style file without ever touching the filesystem in plaintext:
+
+```bash
+# Run a script with secrets auto-injected from 1Password
+op run --env-file=".env.op" -- ./do-snapshot.sh
+```
+
+Where `.env.op` (gitignored) contains `op://` references instead of real values:
+
+```bash
+DO_API_TOKEN=op://Private/DigitalOcean PAT/credential
+SLACK_SIGNING_SECRET=op://Private/SnapRestore Slack App/signing_secret
+SSM_INSTANCE_ID=op://Private/SnapRestore Runner/instance_id
+```
 
 ---
 
@@ -24,11 +103,16 @@ The runner is the machine where the snapshot and restore bash scripts will actua
    ```bash
    sudo apt-get update
    sudo apt-get install -y jq curl
-   
+
    # Install doctl (DigitalOcean CLI)
    wget https://github.com/digitalocean/doctl/releases/download/v1.101.0/doctl-1.101.0-linux-amd64.tar.gz
    tar xf doctl-1.101.0-linux-amd64.tar.gz
    sudo mv doctl /usr/local/bin
+
+   # Install 1Password CLI on the runner (recommended)
+   curl -sS https://downloads.1password.com/linux/keys/1password.asc | sudo gpg --dearmor -o /usr/share/keyrings/1password-archive-keyring.gpg
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" | sudo tee /etc/apt/sources.list.d/1password.list
+   sudo apt update && sudo apt install -y 1password-cli
    ```
 4. **Deploy the Scripts**:
    The Slack integration expects the scripts to reside in `/opt/snaprestore`.
@@ -40,13 +124,38 @@ The runner is the machine where the snapshot and restore bash scripts will actua
    git checkout next-agy
    chmod +x do-snapshot.sh do-restore.sh
    ```
-5. **Configure Credentials**:
-   To allow the SSM agent to authenticate with DigitalOcean without user intervention, export the token globally or set it up in a location accessible by the SSM agent (often runs as `ssm-user` or `root`). A simple way for testing is to add the token to the system-wide environment variables or hardcode it locally for the test run:
+5. **Configure Credentials on the Runner**:
+
+   The SSM agent (which runs as `ssm-user` or `root`) needs access to the DigitalOcean token. Choose one of these approaches:
+
+   **Option A — 1Password Service Account (Most Secure, Recommended for CI/servers):**
+   Create a 1Password Service Account with read access to the `Private` vault, then set the token on the runner:
    ```bash
-   echo 'export DO_API_TOKEN="your_do_personal_access_token_here"' | sudo tee /etc/profile.d/do_api.sh
+   # On the runner machine — store the service account token securely
+   echo 'OP_SERVICE_ACCOUNT_TOKEN="ops_your_service_account_token_here"' | sudo tee /etc/profile.d/op_service.sh
+   sudo chmod 600 /etc/profile.d/op_service.sh
+
+   # The scripts will then resolve the DO token at runtime via:
+   # DO_API_TOKEN=$(op read "op://Private/DigitalOcean PAT/credential")
+   ```
+   To create a Service Account: go to [1password.com](https://1password.com) → Settings → Developer → Service Accounts → New Service Account. Grant it read access to the relevant vault.
+
+   **Option B — Environment variable (simpler for local testing):**
+   ```bash
+   DO_API_TOKEN=$(op read "op://Private/DigitalOcean PAT/credential")
+   echo "export DO_API_TOKEN=\"${DO_API_TOKEN}\"" | sudo tee /etc/profile.d/do_api.sh
+   sudo chmod 600 /etc/profile.d/do_api.sh
    ```
 
-*Make note of your Runner's Instance ID (e.g., `i-0abcdef1234567890` or `mi-0123456789abcdef0`).*
+   **Option C — Directly in the SSM command (via `app.py`):**
+   The Lambda function (`slack-integration/app.py`) can inject the token into the SSM shell command at dispatch time if it is available as a Lambda environment variable. See Part 3.
+
+*Make note of your Runner's Instance ID (e.g., `i-0abcdef1234567890` or `mi-0123456789abcdef0`) — you will store this in 1Password in the step below.*
+
+```bash
+# Store the runner instance ID in 1Password
+op item edit "SnapRestore Runner" --vault Private instance_id="i-0abcdef1234567890"
+```
 
 ---
 
@@ -54,7 +163,12 @@ The runner is the machine where the snapshot and restore bash scripts will actua
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** (From scratch).
 2. Name it `SnapRestore Test` and pick your workspace.
-3. Under **Basic Information** -> **App Credentials**, find the **Signing Secret**. Copy this; you will need it for the Lambda function.
+3. Under **Basic Information** → **App Credentials**, find the **Signing Secret**. Copy this — then immediately store it in 1Password:
+   ```bash
+   op item edit "SnapRestore Slack App" --vault Private signing_secret="xoxb-YOUR-SIGNING-SECRET"
+   # Verify it was stored correctly:
+   op read "op://Private/SnapRestore Slack App/signing_secret"
+   ```
 4. (Hold off on creating the Slash Commands until Part 4, when we have the AWS API Gateway URL).
 
 ---
@@ -69,13 +183,25 @@ The Lambda function bridges the gap between Slack and your Runner machine.
 4. **Architecture**: x86_64 or arm64 (doesn't matter).
 5. Click **Create function**.
 6. In the code editor, copy the contents of `slack-integration/app.py` from this repository and paste it in. Click **Deploy**.
-7. **Set Environment Variables**:
-   Go to Configuration -> Environment variables -> Edit:
-   - `SLACK_SIGNING_SECRET`: Paste the Signing Secret from Slack.
-   - `SSM_INSTANCE_ID`: Paste the Instance ID of your runner machine.
+7. **Set Environment Variables** (use `op read` to retrieve the values — never paste from memory):
+   Go to Configuration → Environment variables → Edit and add:
+   - `SLACK_SIGNING_SECRET`: Retrieved via `op read "op://Private/SnapRestore Slack App/signing_secret"`
+   - `SSM_INSTANCE_ID`: Retrieved via `op read "op://Private/SnapRestore Runner/instance_id"`
+
+   Or use the AWS CLI with `op run` to set them without the values ever appearing in your terminal history:
+   ```bash
+   # Set Lambda environment variables via AWS CLI, secrets resolved by 1Password at runtime
+   SLACK_SIGNING_SECRET=$(op read "op://Private/SnapRestore Slack App/signing_secret")
+   SSM_INSTANCE_ID=$(op read "op://Private/SnapRestore Runner/instance_id")
+
+   aws lambda update-function-configuration \
+     --function-name SlackSnapRestoreTest \
+     --environment "Variables={SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET},SSM_INSTANCE_ID=${SSM_INSTANCE_ID}}"
+   ```
+
 8. **Configure Permissions**:
-   - Go to Configuration -> Permissions and click the Role name.
-   - Click **Add permissions** -> **Create inline policy**.
+   - Go to Configuration → Permissions and click the Role name.
+   - Click **Add permissions** → **Create inline policy**.
    - Use the JSON editor to add SSM permissions:
      ```json
      {
@@ -100,7 +226,7 @@ The Lambda function bridges the gap between Slack and your Runner machine.
 ## Part 4: Exposing Lambda via API Gateway
 
 1. In the AWS Console, navigate to **API Gateway** and click **Create API**.
-2. Select **HTTP API** -> Build.
+2. Select **HTTP API** → Build.
 3. Click **Add integration**, select **Lambda**, and choose the `SlackSnapRestoreTest` function.
 4. Name the API (e.g., `SlackSnapRestoreAPI`) and click Next.
 5. Configure Routes:
@@ -108,14 +234,14 @@ The Lambda function bridges the gap between Slack and your Runner machine.
    - Resource path: `/slack`
    - Integration target: `SlackSnapRestoreTest`
 6. Keep clicking Next and then **Create**.
-7. Find the **Invoke URL** for your API (e.g., `https://xyz.execute-api.region.amazonaws.com/slack`). Copy this URL.
+7. Find the **Invoke URL** for your API (e.g., `https://xyz.execute-api.region.amazonaws.com/slack`). Copy this URL — you will use it for both Slack slash commands in Part 5.
 
 ---
 
 ## Part 5: Finalizing the Slack Integration
 
 1. Go back to your Slack App configuration at [api.slack.com/apps](https://api.slack.com/apps).
-2. Navigate to **Slash Commands** -> **Create New Command**.
+2. Navigate to **Slash Commands** → **Create New Command**.
 3. **Configure `/do-snap`**:
    - Command: `/do-snap`
    - Request URL: Paste the API Gateway Invoke URL.
@@ -139,7 +265,11 @@ Before invoking via Slack, verify the scripts work standalone on your Runner.
 SSH into your Runner machine and run:
 ```bash
 cd /opt/snaprestore
-export DO_API_TOKEN="your_do_token"
+
+# Fetch the token securely from 1Password (if op CLI is configured on the runner)
+export DO_API_TOKEN=$(op read "op://Private/DigitalOcean PAT/credential")
+
+# Or use the environment variable if set via /etc/profile.d/do_api.sh
 ./do-snapshot.sh --dry-run
 ./do-restore.sh --dry-run
 ```
@@ -161,6 +291,7 @@ Next, try initiating a snapshot (using an actual Droplet ID):
 If you want to be cautious during initial testing, you can modify `slack-integration/app.py` to append `--dry-run` to the shell command instead of `--force` while you verify the pipeline.
 
 ### Troubleshooting
-- **No response in Slack after "Job Queued"**: The SSM command failed to execute or the runner didn't have internet access to curl the `response_url`. Check AWS Systems Manager -> Run Command -> Command history to see the stdout/stderr of the execution.
-- **Unauthorized error in Slack**: Ensure the `SLACK_SIGNING_SECRET` environment variable in Lambda matches exactly what is in your Slack App credentials.
-- **Command fails with DO token missing**: Ensure the SSM agent environment has access to the DO token. You might need to directly inject it into the SSM command within `app.py` or ensure it's loaded securely in `/etc/profile.d/`.
+- **No response in Slack after "Job Queued"**: The SSM command failed to execute or the runner didn't have internet access to curl the `response_url`. Check AWS Systems Manager → Run Command → Command history to see the stdout/stderr of the execution.
+- **Unauthorized error in Slack**: Ensure the `SLACK_SIGNING_SECRET` environment variable in Lambda matches exactly what is in your Slack App credentials. Verify with `op read "op://Private/SnapRestore Slack App/signing_secret"`.
+- **Command fails with DO token missing**: The SSM agent environment may not have access to the DO token. Verify the runner's `/etc/profile.d/do_api.sh` is set, or configure a 1Password Service Account on the runner and update the scripts to call `op read` at runtime.
+- **1Password `op` not found**: Install with `brew install 1password-cli` (macOS) or follow the [Linux install guide](https://developer.1password.com/docs/cli/get-started/). Authenticate with `op signin`.

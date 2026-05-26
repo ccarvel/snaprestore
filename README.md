@@ -26,6 +26,7 @@ brew install doctl jq gum 1password-cli
 # Ubuntu/Debian
 sudo snap install doctl
 sudo apt install jq
+# 1Password CLI on Ubuntu/Debian — see https://developer.1password.com/docs/cli/get-started/
 ```
 
 ## Configuration & Setup
@@ -35,21 +36,73 @@ A `.env.example` file is provided in the repository with all possible configurat
 1. Copy `.env.example` to `.env` or inject the variables into your environment.
 2. The scripts interact with DigitalOcean through `doctl`. You do NOT need to run `doctl auth init` if you provide the token via environment variable or 1Password.
 
-### Providing the token
+### Secret Management with 1Password
+
+All credentials should be stored in 1Password and retrieved via `op` — never hardcoded in files or shell history.
+
+**Store secrets (run once):**
+```bash
+# DigitalOcean Personal Access Token
+op item create \
+  --category login \
+  --title "DigitalOcean PAT" \
+  --vault Private \
+  username="snaprestore" \
+  credential="dop_v1_YOUR_TOKEN_HERE"
+
+# Slack App Signing Secret
+op item create \
+  --category login \
+  --title "SnapRestore Slack App" \
+  --vault Private \
+  username="snaprestore-slack" \
+  signing_secret="YOUR_SLACK_SIGNING_SECRET_HERE"
+
+# AWS SSM Runner Instance ID
+op item create \
+  --category login \
+  --title "SnapRestore Runner" \
+  --vault Private \
+  username="snaprestore-runner" \
+  instance_id="i-0abcdef1234567890"
+```
+
+**Read secrets at runtime:**
+```bash
+# Read individual secrets
+op read "op://Private/DigitalOcean PAT/credential"
+op read "op://Private/SnapRestore Slack App/signing_secret"
+op read "op://Private/SnapRestore Runner/instance_id"
+```
+
+**Inject all secrets at once using `op run`:**
+```bash
+# Create .env.op (gitignored) with op:// references instead of real values:
+# DO_API_TOKEN=op://Private/DigitalOcean PAT/credential
+# SLACK_SIGNING_SECRET=op://Private/SnapRestore Slack App/signing_secret
+# SSM_INSTANCE_ID=op://Private/SnapRestore Runner/instance_id
+
+# Then run scripts with secrets auto-injected — no plaintext on disk:
+op run --env-file=".env.op" -- ./do-snapshot.sh
+op run --env-file=".env.op" -- ./do-restore.sh
+```
+
+### Providing the DigitalOcean token
 
 ```bash
-# Option 1: 1Password CLI (Most Secure)
-# The scripts will automatically look for `op` and can fetch the token.
-# Update the scripts' CONFIGURATION sections to point to your vault path:
-# DO_TOKEN=$(op read "op://Private/DigitalOcean/credential" 2>/dev/null)
+# Option 1: 1Password CLI (Most Secure — Recommended)
+export DO_API_TOKEN=$(op read "op://Private/DigitalOcean PAT/credential")
 
-# Option 2: Environment variable
+# Option 2: op run (secrets never touch shell history)
+op run --env-file=".env.op" -- ./do-snapshot.sh
+
+# Option 3: Environment variable
 export DO_API_TOKEN="dop_v1_xxxx"
 
-# Option 3: Edit the script's configuration section or .env file
+# Option 4: Edit the script's configuration section or .env file
 DO_TOKEN="dop_v1_xxxx"
 
-# Option 4: Enter when prompted
+# Option 5: Enter when prompted
 ./do-snapshot.sh
 # ? DigitalOcean API Token: _ (input is hidden)
 ```
