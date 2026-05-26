@@ -1,0 +1,15 @@
+# secrets — never commit live op:// references or resolved tokens
+slack-bot/.env.op
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.uv/
+
+# logs and runtime state
+*.log
+~/.local/share/do-snap-tool/
+~/.config/do-snap-tool/

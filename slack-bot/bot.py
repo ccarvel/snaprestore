@@ -85,47 +85,38 @@ async def run_doctl_long(
     *args: str,
     interval: int = 120,
 ) -> tuple[int, str, str]:
-    """Run a long doctl --wait command, posting progress updates to Slack."""
-    with tempfile.NamedTemporaryFile(mode="r", suffix=".out", delete=False) as fout, \
-         tempfile.NamedTemporaryFile(mode="r", suffix=".err", delete=False) as ferr:
-        out_path, err_path = Path(fout.name), Path(ferr.name)
+    """Run a long doctl --wait command, posting progress updates to Slack.
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "doctl", *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+    Uses proc.wait() in a poll loop rather than proc.communicate() so the
+    coroutine can be safely interrupted for heartbeats without cancellation
+    issues. Output is buffered via PIPE and read after completion.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "doctl", *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
 
-        start = time.monotonic()
-        while True:
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=interval
-                )
-                out_path.write_bytes(stdout_b)
-                err_path.write_bytes(stderr_b)
-                break
-            except asyncio.TimeoutError:
-                if _is_cancelled(job_id):
-                    proc.kill()
-                    await proc.wait()
-                    return -2, "", "Cancelled by user."
-                elapsed = int(time.monotonic() - start)
-                m, s = divmod(elapsed, 60)
-                await client.chat_postMessage(
-                    channel=channel,
-                    thread_ts=thread_ts,
-                    text=f"⏳ {update_msg} — {m:02d}:{s:02d} elapsed…",
-                )
-
-        rc = proc.returncode
-        stdout = out_path.read_text().strip()
-        stderr = err_path.read_text().strip()
-        return rc, stdout, stderr
-    finally:
-        out_path.unlink(missing_ok=True)
-        err_path.unlink(missing_ok=True)
+    start = time.monotonic()
+    while True:
+        try:
+            await asyncio.wait_for(asyncio.shield(proc.wait()), timeout=interval)
+            # process finished — collect output
+            stdout_b = await proc.stdout.read()
+            stderr_b = await proc.stderr.read()
+            return proc.returncode, stdout_b.decode().strip(), stderr_b.decode().strip()
+        except asyncio.TimeoutError:
+            if _is_cancelled(job_id):
+                proc.kill()
+                await proc.wait()
+                return -2, "", "Cancelled by user."
+            elapsed = int(time.monotonic() - start)
+            m, s = divmod(elapsed, 60)
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"⏳ {update_msg} — {m:02d}:{s:02d} elapsed…",
+            )
 
 
 async def health_check(url: str, timeout: int = 300, interval: int = 10) -> bool:
@@ -462,7 +453,9 @@ async def _restore_job(
 
         size_slug = "s-1vcpu-1gb"  # minimal; user can override via hint
 
-        rc, out, err = await run_doctl(
+        create_start = time.monotonic()
+        rc, out, err = await run_doctl_long(
+            job_id, client, channel, thread_ts, "Creating droplet",
             "compute", "droplet", "create", droplet_name,
             "--image", snap_id,
             "--size", size_slug,
@@ -470,12 +463,15 @@ async def _restore_job(
             "--wait",
             "--output", "json",
         )
+        if rc == -2:
+            await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                           text="🛑 Job cancelled.")
+            return
         if rc != 0:
             await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                            text=f"❌ Droplet creation failed.\n```{err[:400]}```")
             return
 
-        create_start = time.monotonic()
         new_droplets = json.loads(out) if out else []
         if not new_droplets:
             await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
