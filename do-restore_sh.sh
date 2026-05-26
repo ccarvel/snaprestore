@@ -1,22 +1,178 @@
 #!/bin/bash
 set -e
 
-trap 'echo ""; echo "Operation aborted."; exit 1' INT QUIT
+trap 'echo ""; echo -e "\033[31mOperation aborted.\033[0m"; exit 1' INT QUIT
 
 #-----------------------------------------
-# CONFIGURATION - Set these or use "list" to fetch
+# UI BOOTSTRAPPER & TOOLKIT
 #-----------------------------------------
-DO_TOKEN=""           # Required: your DigitalOcean API token
-SNAPSHOT_ID=""        # Use "list" to see available snapshots
-SSH_KEY_ID=""         # Use "list" to see available SSH keys
-SIZE_SLUG=""          # Use "list" to see available sizes (requires SNAPSHOT_ID)
-DROPLET_NAME=""       # Optional: defaults to restored-{snapshot}-{date}
-RESERVED_IP=""        # Use "list" to see available reserved IPs, or set IP to assign
-DROPLET_TAGS=""       # Optional: comma-separated list of tags
-VPC_UUID=""           # Optional: VPC UUID
-USER_DATA_FILE=""     # Optional: Path to cloud-init user-data file
-DRY_RUN=0             # Set to 1 to enable dry-run mode
+USE_GUM=0
+if command -v gum >/dev/null 2>&1; then
+  USE_GUM=1
+else
+  if command -v brew >/dev/null 2>&1; then
+    echo -e "\033[1;36m[Optional]\033[0m This script supports an enhanced visual UI using 'gum'."
+    read -r -p "Would you like to install gum via Homebrew? (y/N): " INSTALL_GUM
+    if [[ "$INSTALL_GUM" =~ ^[Yy] ]]; then
+      echo "Installing gum..."
+      if brew install gum; then
+        USE_GUM=1
+      else
+        echo -e "\033[31mFailed to install gum. Falling back to text UI.\033[0m"
+      fi
+    fi
+  fi
+fi
+
+# NO_COLOR handling
+if [ -n "$NO_COLOR" ]; then
+  C_RESET=""
+  C_INFO=""
+  C_SUCCESS=""
+  C_WARN=""
+  C_ERROR=""
+  C_HEADER=""
+  C_DIM=""
+else
+  C_RESET="\033[0m"
+  C_INFO="\033[34m"     # Blue
+  C_SUCCESS="\033[32m"  # Green
+  C_WARN="\033[33m"     # Yellow
+  C_ERROR="\033[31m"    # Red
+  C_HEADER="\033[1;36m" # Bold Cyan
+  C_DIM="\033[2m"       # Dim
+fi
+
+ui_header() {
+  if [ "$USE_GUM" -eq 1 ]; then
+    gum style --border double --margin "1 0" --padding "0 2" --border-foreground 212 "$1"
+  else
+    echo ""
+    echo -e "${C_HEADER}========================================${C_RESET}"
+    echo -e "${C_HEADER}  $1${C_RESET}"
+    echo -e "${C_HEADER}========================================${C_RESET}"
+  fi
+}
+
+ui_info() { echo -e "${C_INFO}▸ INFO${C_RESET}  $1"; }
+ui_success() { echo -e "${C_SUCCESS}✓ OK${C_RESET}    $1"; }
+ui_warn() { echo -e "${C_WARN}⚠ WARN${C_RESET}  $1" >&2; }
+ui_error() { echo -e "${C_ERROR}✗ ERROR${C_RESET} $1" >&2; }
+
+ui_spin() {
+  local title="$1"
+  shift
+  if [ "$USE_GUM" -eq 1 ]; then
+    gum spin --spinner dot --title "$title" -- "$@"
+  else
+    echo -e "${C_INFO}⏳ WAIT${C_RESET}  $title"
+    "$@"
+    ui_success "Done."
+  fi
+}
+
+ui_choose() {
+  local prompt="$1"
+  shift
+  local options=("$@")
+  
+  if [ "$USE_GUM" -eq 1 ]; then
+    echo -e "${C_INFO}?${C_RESET} $prompt"
+    local selected
+    selected=$(printf '%s\n' "${options[@]}" | gum choose --cursor="> " --height=15)
+    if [ -z "$selected" ]; then
+      ui_error "Selection cancelled."
+      exit 1
+    fi
+    echo "$selected"
+  else
+    # Fallback to fzf if available, else numbered list
+    if command -v fzf >/dev/null 2>&1; then
+      local selected
+      selected=$(printf '%s\n' "${options[@]}" | fzf --height=15 --prompt="$prompt ")
+      if [ -z "$selected" ]; then
+        ui_error "Selection cancelled."
+        exit 1
+      fi
+      echo "$selected"
+    else
+      echo "" >&2
+      echo -e "${C_INFO}?${C_RESET} $prompt" >&2
+      local i=1
+      for opt in "${options[@]}"; do
+        echo "  $i) $opt" >&2
+        ((i++))
+      done
+      local selection
+      if ! read -r -p "Enter number: " selection; then
+         echo "" >&2
+         ui_error "Selection cancelled."
+         exit 1
+      fi
+      if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#options[@]}" ]; then
+         ui_error "Invalid selection."
+         exit 1
+      fi
+      echo "${options[$((selection-1))]}"
+    fi
+  fi
+}
+
+ui_confirm() {
+  local prompt="$1"
+  if [ "$USE_GUM" -eq 1 ]; then
+    gum confirm "$prompt"
+    return $?
+  else
+    local answer
+    read -r -p "? $prompt (y/N): " answer
+    if [[ "$answer" =~ ^[Yy] ]]; then
+      return 0
+    else
+      return 1
+    fi
+  fi
+}
+
+ui_input() {
+  local prompt="$1"
+  local default="$2"
+  local res
+  if [ "$USE_GUM" -eq 1 ]; then
+    res=$(gum input --prompt="? $prompt " --placeholder="$default")
+  else
+    read -r -p "? $prompt [$default]: " res
+  fi
+  [ -z "$res" ] && res="$default"
+  echo "$res"
+}
+
+ui_input_secret() {
+  local prompt="$1"
+  local res
+  if [ "$USE_GUM" -eq 1 ]; then
+    res=$(gum input --password --prompt="? $prompt ")
+    echo "$res"
+  else
+    read -rs -p "? $prompt " res
+    echo "" >&2
+    echo "$res"
+  fi
+}
+
 #-----------------------------------------
+# CONFIGURATION
+#-----------------------------------------
+DO_TOKEN=""           
+SNAPSHOT_ID=""        
+SSH_KEY_ID=""         
+SIZE_SLUG=""          
+DROPLET_NAME=""       
+RESERVED_IP=""        
+DROPLET_TAGS=""       
+VPC_UUID=""           
+USER_DATA_FILE=""     
+DRY_RUN=0             
 
 CACHE_DIR="${HOME}/.config/do-snap-tool"
 LOG_DIR="${HOME}/.local/share/do-snap-tool"
@@ -33,69 +189,31 @@ log_action() {
 
 if [[ "$1" == "--dry-run" ]]; then
   DRY_RUN=1
-  echo "⚠️ DRY RUN MODE ENABLED. No mutating DO API calls will be executed. ⚠️"
-  echo ""
+  ui_warn "DRY RUN MODE ENABLED. No mutating DO API calls will be executed."
 fi
 
-HAS_FZF=$(command -v fzf >/dev/null 2>&1 && echo "yes" || echo "no")
-
 if ! command -v doctl >/dev/null 2>&1; then
-  echo "Error: doctl is required but not installed."
-  echo "Install with: brew install doctl"
+  ui_error "doctl is required but not installed."
+  ui_info "Install with: brew install doctl"
   exit 1
 fi
 
-select_option() {
-  local prompt="$1"
-  shift
-  local options=("$@")
-  
-  if [ "$HAS_FZF" = "yes" ]; then
-    local selected
-    selected=$(printf '%s\n' "${options[@]}" | fzf --height=15 --prompt="$prompt ")
-    if [ -z "$selected" ]; then
-      echo "Selection cancelled." >&2
-      exit 1
-    fi
-    echo "$selected"
-  else
-    echo "" >&2
-    echo "$prompt" >&2
-    echo "-------------------" >&2
-    local i=1
-    for opt in "${options[@]}"; do
-      echo "  $i) $opt" >&2
-      ((i++))
-    done
-    echo "" >&2
-    local selection
-    if ! read -r -p "Enter number: " selection; then
-       echo -e "\nSelection cancelled." >&2
-       exit 1
-    fi
-    
-    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#options[@]}" ]; then
-       echo "Invalid selection." >&2
-       exit 1
-    fi
-    echo "${options[$((selection-1))]}"
-  fi
-}
+ui_header "DigitalOcean Restore Tool"
 
 if [ -z "$DO_TOKEN" ]; then
   DO_TOKEN="${DO_API_TOKEN:-}"
 fi
 
 if [ -z "$DO_TOKEN" ] && command -v op >/dev/null 2>&1; then
-  : # DO_TOKEN=$(op read "op://Private/DigitalOcean/credential" 2>/dev/null || echo "")
+  : # Placeholder for op read
 fi
 
 if [ -z "$DO_TOKEN" ]; then
-  if ! read -rs -p "DigitalOcean API Token: " DO_TOKEN; then
-    echo -e "\nInput cancelled."
+  DO_TOKEN=$(ui_input_secret "DigitalOcean API Token:")
+  if [ -z "$DO_TOKEN" ]; then
+    ui_error "Input cancelled."
     exit 1
   fi
-  echo ""
 fi
 
 export DIGITALOCEAN_ACCESS_TOKEN="$DO_TOKEN"
@@ -103,8 +221,6 @@ export DIGITALOCEAN_ACCESS_TOKEN="$DO_TOKEN"
 update_cache() {
   local cache_file="$1"
   local cmd="$2"
-  # Cache for 24 hours (86400 seconds)
-  # using posix compliant stat check for mac/linux
   local mod_time
   if stat -f %m "$cache_file" >/dev/null 2>&1; then
     mod_time=$(stat -f %m "$cache_file")
@@ -123,8 +239,7 @@ update_cache() {
 }
 
 list_snapshots() {
-  echo "Fetching snapshots..."
-  # Calculate age in jq
+  ui_info "Fetching snapshots..."
   doctl compute snapshot list --resource droplet -o json | jq -r '
     .[] | 
     .created_at as $t |
@@ -136,14 +251,14 @@ list_snapshots() {
 }
 
 list_ssh_keys() {
-  echo "Fetching SSH keys..."
+  ui_info "Fetching SSH keys..."
   doctl compute ssh-key list --format "ID,Name" --no-header | awk '{print $1"  "$2}'
 }
 
 list_sizes() {
   SNAPSHOT_ID_CHECK=$(echo "$SNAPSHOT_ID" | tr '[:upper:]' '[:lower:]')
   if [ -z "$SNAPSHOT_ID" ] || [ "$SNAPSHOT_ID_CHECK" = "list" ]; then
-    echo "Error: Set SNAPSHOT_ID first to list compatible sizes"
+    ui_error "Error: Set SNAPSHOT_ID first to list compatible sizes"
     exit 1
   fi
   
@@ -151,7 +266,7 @@ list_sizes() {
   SNAPSHOT_MIN_DISK=$(echo "$SNAPSHOT_JSON" | jq -r '.[0].min_disk_size')
   SNAPSHOT_REGION=$(echo "$SNAPSHOT_JSON" | jq -r '.[0].regions[0]')
   
-  echo "Fetching sizes compatible with snapshot (min disk: ${SNAPSHOT_MIN_DISK}GB, region: $SNAPSHOT_REGION)..."
+  ui_info "Fetching sizes compatible with snapshot (min disk: ${SNAPSHOT_MIN_DISK}GB, region: $SNAPSHOT_REGION)..."
   update_cache "$SIZES_CACHE" "doctl compute size list"
   jq -r --arg region "$SNAPSHOT_REGION" --argjson min_disk "$SNAPSHOT_MIN_DISK" \
     '.[] | select(.available == true) | select(.regions[] == $region) | select(.disk >= $min_disk) | "\(.slug)  \(.vcpus)vCPU  \(.memory)MB RAM  \(.disk)GB disk  $\(.price_monthly)/mo"' \
@@ -159,7 +274,7 @@ list_sizes() {
 }
 
 list_reserved_ips() {
-  echo "Fetching reserved IPs..."
+  ui_info "Fetching reserved IPs..."
   doctl compute reserved-ip list -o json | jq -r '.[] | "\(.ip)  \(.region.slug)  droplet: \(.droplet.id // "unassigned")"'
 }
 
@@ -173,7 +288,7 @@ case "$SSH_KEY_ID_LOWER" in list|get) list_ssh_keys; exit 0 ;; esac
 case "$SIZE_SLUG_LOWER" in list|get) list_sizes; exit 0 ;; esac
 case "$RESERVED_IP_LOWER" in list|get) list_reserved_ips; exit 0 ;; esac
 
-echo "Fetching snapshots..."
+ui_info "Fetching snapshots..."
 SNAPSHOTS_RAW=$(doctl compute snapshot list --resource droplet -o json)
 
 if [ -z "$SNAPSHOT_ID" ]; then
@@ -190,11 +305,11 @@ if [ -z "$SNAPSHOT_ID" ]; then
   IFS="$OIFS"
   
   if [ ${#SNAPSHOT_OPTIONS[@]} -eq 0 ]; then
-    echo "No snapshots found."
+    ui_error "No snapshots found."
     exit 1
   fi
   
-  SELECTED=$(select_option "Select snapshot:" "${SNAPSHOT_OPTIONS[@]}")
+  SELECTED=$(ui_choose "Select snapshot:" "${SNAPSHOT_OPTIONS[@]}")
   SNAPSHOT_ID=$(echo "$SELECTED" | cut -d'|' -f1)
 fi
 
@@ -204,13 +319,9 @@ SNAPSHOT_MIN_DISK=$(echo "$SNAPSHOT" | jq -r '.min_disk_size')
 SNAPSHOT_REGION=$(echo "$SNAPSHOT" | jq -r '.regions[0]')
 SNAPSHOT_NAME=$(echo "$SNAPSHOT" | jq -r '.name')
 
-echo ""
-echo "Selected: $SNAPSHOT_NAME"
-echo "Size: ${SNAPSHOT_SIZE}GB (min disk: ${SNAPSHOT_MIN_DISK}GB)"
-echo "Region: $SNAPSHOT_REGION"
+ui_info "Selected: $SNAPSHOT_NAME ($SNAPSHOT_REGION, ${SNAPSHOT_SIZE}GB)"
 
-echo ""
-echo "Fetching droplet sizes..."
+ui_info "Fetching droplet sizes..."
 update_cache "$SIZES_CACHE" "doctl compute size list"
 
 if [ -z "$SIZE_SLUG" ]; then
@@ -222,58 +333,37 @@ if [ -z "$SIZE_SLUG" ]; then
   IFS="$OIFS"
   
   if [ ${#SIZE_OPTIONS[@]} -eq 0 ]; then
-    echo "No compatible droplet sizes found (need >= ${SNAPSHOT_MIN_DISK}GB disk in $SNAPSHOT_REGION)."
+    ui_error "No compatible droplet sizes found (need >= ${SNAPSHOT_MIN_DISK}GB disk in $SNAPSHOT_REGION)."
     exit 1
   fi
   
-  SELECTED=$(select_option "Select droplet size:" "${SIZE_OPTIONS[@]}")
+  SELECTED=$(ui_choose "Select droplet size:" "${SIZE_OPTIONS[@]}")
   SIZE_SLUG=$(echo "$SELECTED" | cut -d'|' -f1)
 fi
 
-echo "Selected size: $SIZE_SLUG"
-
-echo ""
-echo "Fetching SSH keys..."
+ui_info "Fetching SSH keys..."
 KEYS=$(doctl compute ssh-key list -o json)
 
 if [ -z "$SSH_KEY_ID" ]; then
-  echo ""
-  if ! read -r -p "Does this droplet require an SSH key? (y/n): " NEED_SSH_KEY; then
-    echo -e "\nCancelled."
-    exit 1
-  fi
-  
-  if [[ "$NEED_SSH_KEY" =~ ^[Yy] ]]; then
+  if ui_confirm "Does this droplet require an SSH key?"; then
     OIFS="$IFS"
     IFS=$'\n'
     KEY_OPTIONS=($(echo "$KEYS" | jq -r '.[] | "\(.id)|\(.name)"'))
     IFS="$OIFS"
     
     if [ ${#KEY_OPTIONS[@]} -eq 0 ]; then
-      echo "No SSH keys found in your account."
+      ui_error "No SSH keys found in your account."
       exit 1
     fi
     
-    SELECTED=$(select_option "Select SSH key:" "${KEY_OPTIONS[@]}")
+    SELECTED=$(ui_choose "Select SSH key:" "${KEY_OPTIONS[@]}")
     SSH_KEY_ID=$(echo "$SELECTED" | cut -d'|' -f1)
   fi
 fi
 
-if [ -n "$SSH_KEY_ID" ]; then
-  echo "Selected SSH key: $SSH_KEY_ID"
-else
-  echo "No SSH key selected."
-fi
-
 if [ -z "$RESERVED_IP" ]; then
-  echo ""
-  if ! read -r -p "Assign a reserved IP? (y/n): " NEED_RESERVED_IP; then
-    echo -e "\nCancelled."
-    exit 1
-  fi
-  
-  if [[ "$NEED_RESERVED_IP" =~ ^[Yy] ]]; then
-    echo "Fetching reserved IPs..."
+  if ui_confirm "Assign a reserved IP?"; then
+    ui_info "Fetching reserved IPs..."
     RESERVED_IPS=$(doctl compute reserved-ip list -o json)
     
     OIFS="$IFS"
@@ -283,72 +373,63 @@ if [ -z "$RESERVED_IP" ]; then
     IFS="$OIFS"
     
     if [ ${#IP_OPTIONS[@]} -eq 0 ]; then
-      echo "No unassigned reserved IPs found in $SNAPSHOT_REGION."
+      ui_warn "No unassigned reserved IPs found in $SNAPSHOT_REGION."
       RESERVED_IP=""
     else
-      SELECTED=$(select_option "Select reserved IP:" "${IP_OPTIONS[@]}")
+      SELECTED=$(ui_choose "Select reserved IP:" "${IP_OPTIONS[@]}")
       RESERVED_IP=$(echo "$SELECTED" | cut -d'|' -f1)
-      echo "Selected reserved IP: $RESERVED_IP"
     fi
   fi
 fi
 
 if [ -z "$DROPLET_TAGS" ]; then
-  echo ""
-  if read -r -p "Comma-separated tags (leave blank for none): " DROPLET_TAGS_INPUT; then
-    DROPLET_TAGS="$DROPLET_TAGS_INPUT"
-  fi
+  DROPLET_TAGS=$(ui_input "Comma-separated tags (leave blank for none):" "")
 fi
 
 if [ -z "$VPC_UUID" ]; then
-  echo ""
-  if read -r -p "VPC UUID (leave blank for default): " VPC_UUID_INPUT; then
-    VPC_UUID="$VPC_UUID_INPUT"
-  fi
+  VPC_UUID=$(ui_input "VPC UUID (leave blank for default):" "")
 fi
 
 if [ -z "$USER_DATA_FILE" ]; then
-  echo ""
-  if read -r -p "Cloud-init user-data file path (leave blank for none): " USER_DATA_INPUT; then
-    USER_DATA_FILE="$USER_DATA_INPUT"
-  fi
+  USER_DATA_FILE=$(ui_input "Cloud-init user-data file path (leave blank for none):" "")
 fi
 
 if [ -z "$DROPLET_NAME" ]; then
   DEFAULT_NAME="restored-$(echo "$SNAPSHOT_NAME" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')-$(date +%Y%m%d)"
+  DROPLET_NAME=$(ui_input "Droplet name:" "$DEFAULT_NAME")
+fi
+
+if [ "$USE_GUM" -eq 1 ]; then
+  DETAILS="Name: $DROPLET_NAME
+Size: $SIZE_SLUG
+Region: $SNAPSHOT_REGION
+Image: $SNAPSHOT_ID ($SNAPSHOT_NAME)
+SSH Keys: ${SSH_KEY_ID:-(none)}
+Reserved IP: ${RESERVED_IP:-(none)}
+Tags: ${DROPLET_TAGS:-(none)}
+VPC: ${VPC_UUID:-(default)}
+User Data: ${USER_DATA_FILE:-(none)}"
+  gum style --margin "1 2" --padding "1 2" --border rounded --border-foreground 212 "$DETAILS"
+else
   echo ""
-  if ! read -r -p "Droplet name [$DEFAULT_NAME]: " DROPLET_NAME; then
-    echo -e "\nCancelled."
-    exit 1
-  fi
-  DROPLET_NAME=${DROPLET_NAME:-$DEFAULT_NAME}
+  echo -e "${C_DIM}Droplet Configuration${C_RESET}"
+  echo "  Name: $DROPLET_NAME"
+  echo "  Size: $SIZE_SLUG"
+  echo "  Region: $SNAPSHOT_REGION"
+  echo "  Image: $SNAPSHOT_ID ($SNAPSHOT_NAME)"
+  echo "  SSH Keys: ${SSH_KEY_ID:-(none)}"
+  echo "  Reserved IP: ${RESERVED_IP:-(none)}"
+  echo "  Tags: ${DROPLET_TAGS:-(none)}"
+  echo "  VPC: ${VPC_UUID:-(default)}"
+  echo "  User Data: ${USER_DATA_FILE:-(none)}"
+  echo ""
 fi
 
-echo ""
-echo "========================================"
-echo "Creating droplet:"
-echo "  Name: $DROPLET_NAME"
-echo "  Size: $SIZE_SLUG"
-echo "  Region: $SNAPSHOT_REGION"
-echo "  Image: $SNAPSHOT_ID ($SNAPSHOT_NAME)"
-if [ -n "$SSH_KEY_ID" ]; then echo "  SSH Keys: $SSH_KEY_ID"; fi
-if [ -n "$RESERVED_IP" ]; then echo "  Reserved IP: $RESERVED_IP"; fi
-if [ -n "$DROPLET_TAGS" ]; then echo "  Tags: $DROPLET_TAGS"; fi
-if [ -n "$VPC_UUID" ]; then echo "  VPC: $VPC_UUID"; fi
-if [ -n "$USER_DATA_FILE" ]; then echo "  User Data: $USER_DATA_FILE"; fi
-echo "========================================"
-echo ""
-if ! read -r -p "Proceed? (y/n): " CONFIRM; then
-  echo -e "\nAborted."
-  exit 1
-fi
-
-if [[ ! "$CONFIRM" =~ ^[Yy] ]]; then
-  echo "Aborted."
+if ! ui_confirm "Proceed?"; then
+  ui_error "Aborted."
   exit 0
 fi
 
-# Build doctl command array
 CREATE_CMD=("doctl" "compute" "droplet" "create" "$DROPLET_NAME" "--region" "$SNAPSHOT_REGION" "--size" "$SIZE_SLUG" "--image" "$SNAPSHOT_ID" "--wait")
 
 if [ -n "$SSH_KEY_ID" ]; then CREATE_CMD+=("--ssh-keys" "$SSH_KEY_ID"); fi
@@ -357,40 +438,39 @@ if [ -n "$VPC_UUID" ]; then CREATE_CMD+=("--vpc-uuid" "$VPC_UUID"); fi
 if [ -n "$USER_DATA_FILE" ] && [ -f "$USER_DATA_FILE" ]; then CREATE_CMD+=("--user-data-file" "$USER_DATA_FILE"); fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "[DRY RUN] ${CREATE_CMD[*]}"
+  ui_info "[DRY RUN] ${CREATE_CMD[*]}"
   DROPLET_ID="dry-run-droplet-id"
   IP="203.0.113.1"
 else
-  echo "Creating droplet (this may take a few minutes)..."
-  if ! CREATE_RESPONSE=$("${CREATE_CMD[@]}" -o json); then
-    echo "Failed to create droplet."
+  CREATE_RESPONSE=$(mktemp)
+  if ! ui_spin "Creating droplet (takes a few minutes)..." "${CREATE_CMD[@]}" -o json > "$CREATE_RESPONSE"; then
+    ui_error "Failed to create droplet."
+    cat "$CREATE_RESPONSE"
+    rm "$CREATE_RESPONSE"
     exit 1
   fi
   
-  DROPLET_ID=$(echo "$CREATE_RESPONSE" | jq -r '.[0].id')
-  IP=$(echo "$CREATE_RESPONSE" | jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address' | head -1)
+  DROPLET_ID=$(cat "$CREATE_RESPONSE" | jq -r '.[0].id')
+  IP=$(cat "$CREATE_RESPONSE" | jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address' | head -1)
+  rm "$CREATE_RESPONSE"
   
-  echo "Created droplet: $DROPLET_ID"
+  ui_success "Created droplet: $DROPLET_ID"
   log_action "Restored droplet '$DROPLET_NAME' (ID: $DROPLET_ID) from snapshot '$SNAPSHOT_ID'."
 fi
 
 if [ -n "$RESERVED_IP" ]; then
-  echo ""
-  echo "Assigning reserved IP $RESERVED_IP to droplet..."
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY RUN] doctl compute reserved-ip-action assign $RESERVED_IP $DROPLET_ID"
+    ui_info "[DRY RUN] doctl compute reserved-ip-action assign $RESERVED_IP $DROPLET_ID"
   else
-    if doctl compute reserved-ip-action assign "$RESERVED_IP" "$DROPLET_ID"; then
-      echo "Reserved IP assigned successfully!"
-      echo ""
-      echo "Connect with: ssh root@$RESERVED_IP"
+    if ui_spin "Assigning reserved IP $RESERVED_IP to droplet..." doctl compute reserved-ip-action assign "$RESERVED_IP" "$DROPLET_ID"; then
+      ui_success "Reserved IP assigned successfully!"
+      ui_info "Connect with: ssh root@$RESERVED_IP"
       log_action "Assigned reserved IP $RESERVED_IP to droplet '$DROPLET_NAME' (ID: $DROPLET_ID)."
     else
-      echo "Failed to assign reserved IP. You may need to assign it manually in the DO console."
-      echo "Connect with: ssh root@$IP"
+      ui_error "Failed to assign reserved IP. You may need to assign it manually in the DO console."
+      ui_info "Connect with: ssh root@$IP"
     fi
   fi
 else
-  echo ""
-  echo "Connect with: ssh root@$IP"
+  ui_info "Connect with: ssh root@$IP"
 fi
