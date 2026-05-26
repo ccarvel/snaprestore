@@ -9,7 +9,7 @@ SSH_KEY_ID=""       # SSH key ID (comma-separated for multiple), or blank to pro
 SIZE_SLUG=""        # Droplet size slug, or blank to prompt
 DROPLET_NAME=""     # Optional: defaults to restored-{snapshot-name}-{YYYYMMDD}
 RESERVED_IP=""      # Reserved IP to assign, or blank to prompt
-OP_ITEM=""          # Optional: 1Password path, e.g. op://CDS_Vault/DigitalOcean/token
+OP_ITEM=""          # Optional: 1Password path, e.g. op://<your-vault>/DigitalOcean/token
 DOCTL_CONTEXT="snaprestore"    # doctl auth context name (doctl auth list to see yours)
 #-----------------------------------------
 

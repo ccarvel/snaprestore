@@ -1,500 +1,319 @@
-# snaprestore — Complete Setup Guide
+# Setup Guide
 
-Everything you need to go from zero to a working snapshot/restore workflow, plus the optional Slack bot on a dedicated controller droplet.
+Complete first-time setup from zero to a working snapshot/restore workflow, including the optional Slack bot. Follow the parts in order.
 
----
-
-## Table of Contents
-
-1. [Prerequisites](#prerequisites)
-2. [Part 1 — DigitalOcean](#part-1--digitalocean)
-3. [Part 2 — doctl](#part-2--doctl)
-4. [Part 3 — 1Password](#part-3--1password)
-5. [Part 4 — Environment File](#part-4--environment-file)
-6. [Part 5 — Testing the Scripts](#part-5--testing-the-scripts)
-7. [Part 6 — Controller Droplet](#part-6--controller-droplet)
-8. [Part 7 — Slack App Setup](#part-7--slack-app-setup)
-9. [Quick Reference](#quick-reference)
+**Parts 1–4** cover the scripts only. **Parts 5–6** add the Slack bot — skip if you don't need it.
 
 ---
 
-## Prerequisites
-
-Install required tools before starting:
-
-| Tool | Required | Install |
-|------|----------|---------|
-| `doctl` | Yes | `brew install doctl` |
-| `jq` | Yes | `brew install jq` |
-| `1password-cli` | Yes (for `op://` injection) | `brew install 1password-cli` |
-| `fzf` | Optional (arrow-key menus) | `brew install fzf` |
-| `gum` | Optional (rich TUI on first run) | `brew install gum` |
-
-Install all at once:
+## Part 1 — Install tools
 
 ```bash
 brew install doctl jq 1password-cli fzf gum
 ```
 
-Verify installs:
+Verify:
 
 ```bash
-doctl version
-jq --version
-op --version
+doctl version && jq --version && op --version
 ```
 
 ---
 
-## Part 1 — DigitalOcean
+## Part 2 — DigitalOcean API tokens
 
-### 1.1 Create a DigitalOcean API token
+You need two tokens: one for the scripts, one for the Slack bot. Keep them separate so you can revoke them independently.
 
-You need at minimum one API token. For production, create separate tokens — one for the scripts and one for the Slack bot — so you can revoke them independently.
+Go to [cloud.digitalocean.com/account/api/tokens](https://cloud.digitalocean.com/account/api/tokens) → **Generate New Token** → **Custom Scopes**.
 
-Create **two tokens** — one for the scripts, one for the Slack bot — so you can revoke them independently.
-
-**Token 1 — Scripts (`snaprestore-scripts`):**
-Used by `do-restore.sh` and `do-snapshot.sh` via the doctl context. This token needs full read/write access to droplets, snapshots, SSH keys, and reserved IPs.
-
-1. Log in to [cloud.digitalocean.com](https://cloud.digitalocean.com).
-2. Go to **API** → **Tokens** → **Generate New Token**.
-3. Name it `snaprestore-scripts`.
-4. Select **Custom Scopes** and enable **all** of the following:
+### Token 1 — Scripts (`snaprestore-scripts`)
 
 | Scope | Required by |
 |-------|-------------|
-| `droplet:read` | Both scripts — list and inspect droplets |
-| `droplet:create` | `do-restore.sh` — create a new droplet from snapshot |
-| `droplet:update` | `do-snapshot.sh` — power off droplet; trigger snapshot action |
-| `droplet:delete` | `do-snapshot.sh` — delete droplet after snapshot (optional) |
-| `snapshot:read` | Both scripts — list and select snapshots |
+| `droplet:read` | Both scripts |
+| `droplet:create` | `do-restore.sh` |
+| `droplet:update` | `do-snapshot.sh` — shutdown, power-off, snapshot action |
+| `droplet:delete` | `do-snapshot.sh` — delete after snapshot (optional) |
+| `snapshot:read` | Both scripts |
 | `snapshot:delete` | `do-snapshot.sh` — prune old snapshots |
-| `ssh_key:read` | `do-restore.sh` — list SSH keys to attach at creation |
-| `reserved_ip:read` | Both scripts — list reserved IPs |
-| `reserved_ip:update` | `do-restore.sh` — assign reserved IP to restored droplet |
-| `action:read` | `do-restore.sh` — poll reserved IP assignment action status |
+| `ssh_key:read` | `do-restore.sh` — attach SSH key at creation |
+| `reserved_ip:read` | Both scripts |
+| `reserved_ip:update` | `do-restore.sh` — assign reserved IP |
+| `action:read` | `do-restore.sh` — poll reserved IP assignment status |
 
-> **Missing `droplet:create` is the most common setup mistake.** Without it, the restore wizard completes normally but the droplet is never created and no error is shown.
+> **Missing `droplet:create` is the most common setup mistake.** Without it, the restore wizard completes normally but no droplet is created and no error is shown.
 
-5. Click **Generate Token**, copy the value — **shown only once** — and store it in 1Password immediately (see Part 3).
+Copy the token — shown only once — and store it in 1Password immediately.
 
----
+### Token 2 — Slack bot (`snaprestore-bot`)
 
-**Token 2 — Slack bot (`snaprestore-bot`):**
-Used by the Slack bot service. The bot makes the same DO API calls as the scripts (list droplets, take snapshots, create droplets from snapshots), so it needs the same scopes. Create a second token with **the same scope table above** — no additional scopes required.
+Same scope set as above. The bot makes identical DO API calls to the scripts. Store this one separately in 1Password.
 
-The bot does **not** use reserved IPs or SSH key lookups, so `reserved_ip:read`, `reserved_ip:update`, and `ssh_key:read` are technically unnecessary for it — but including them keeps both tokens symmetric and makes future features easier.
-
----
-
-> **Note — “Droplet Action” scope no longer exists.** DigitalOcean’s current custom scopes UI (GA’d 2024) uses granular CRUD scopes per resource. Snapshot creation is triggered via the Droplet Actions API and is covered by `droplet:update`. Full reference: [docs.digitalocean.com/reference/api/scopes](https://docs.digitalocean.com/reference/api/scopes/).
-
-> **WARNING:** Never paste a raw token into a script, commit it to git, or store it in shell history.
-
-### 1.2 Verify you have a droplet
-
-The snapshot script needs at least one existing droplet. List yours:
-
-```bash
-doctl compute droplet list
-```
-
-If you have no droplets yet, create a minimal one for testing:
-
-```bash
-doctl compute droplet create test-droplet \
-  --image ubuntu-22-04-x64 \
-  --size s-1vcpu-1gb \
-  --region nyc1 \
-  --ssh-keys $(doctl compute ssh-key list --no-header --format ID | head -1)
-```
-
-Wait ~60 seconds, then verify it is active:
-
-```bash
-doctl compute droplet list
-```
-
-### 1.3 Create a test snapshot
-
-`do-restore.sh` needs at least one existing snapshot to work with. Create one using any of these methods:
-
-**Option A — use the script (recommended after completing setup):**
-
-```bash
-./do-snapshot.sh
-# Select the droplet → accept the default name → choose "leave" or "delete"
-```
-
-**Option B — create one via doctl directly:**
-
-```bash
-DROPLET_ID=$(doctl compute droplet list --no-header --format ID | head -1)
-doctl compute droplet-action snapshot "$DROPLET_ID" \
-  --snapshot-name "test-snapshot-$(date +%Y%m%d)" --wait
-```
-
-**Option C — create one in the control panel:**
-
-1. Go to **Droplets** → click your droplet → **Snapshots** tab → **Take Snapshot**.
-2. Give it a name and click **Take Snapshot**.
-
-After creating a snapshot, verify it appears:
-
-```bash
-doctl compute snapshot list --resource droplet
-```
-
-### 1.4 (Optional) Reserve an IP
-
-A reserved IP keeps your droplet's IP address constant across snapshot/restore cycles so DNS and Cloudflare configurations stay valid.
-
-1. Go to **Networking** → **Reserved IPs** → **Reserve New IP**.
-2. Select the same region as your droplet and click **Reserve IP**.
-
-List your reserved IPs:
-
-```bash
-doctl compute reserved-ip list
-```
+> The "Droplet Action" scope no longer exists in DigitalOcean's current UI. Snapshot creation is covered by `droplet:update`.
 
 ---
 
-## Part 2 — doctl
+## Part 3 — 1Password
 
-### 2.1 Authenticate doctl
+### 3.1 Sign in
+
+```bash
+op signin
+op account list   # confirm you're signed in
+```
+
+### 3.2 Store the scripts token
+
+```bash
+op item create \
+  --category login \
+  --title "DigitalOcean API Token snaprestore-scripts" \
+  --vault <your-vault> \
+  "credential=dop_v1_YOUR_TOKEN_HERE"
+```
+
+Verify it resolves:
+
+```bash
+op read "op://<your-vault>/DigitalOcean API Token snaprestore-scripts/credential"
+```
+
+### 3.3 Store the bot secrets (after completing Part 5)
+
+Once you have the Slack tokens from Part 5, run:
+
+```bash
+op item create \
+  --category login \
+  --title "do-snap-bot" \
+  --vault <your-vault> \
+  "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
+  "slack-app-token=xapp-YOUR_APP_TOKEN" \
+  "signing-secret=YOUR_SIGNING_SECRET" \
+  "do-token=dop_v1_YOUR_BOT_DO_TOKEN" \
+  "allowed-users=U01AB2CD3"
+```
+
+The resulting paths (used in `slack-bot/.env.op`):
+
+| Secret | Path |
+|--------|------|
+| Slack bot token | `op://<your-vault>/do-snap-bot/slack-bot-token` |
+| Slack app token | `op://<your-vault>/do-snap-bot/slack-app-token` |
+| Signing secret | `op://<your-vault>/do-snap-bot/signing-secret` |
+| DO API token | `op://<your-vault>/do-snap-bot/do-token` |
+| Allowed user IDs | `op://<your-vault>/do-snap-bot/allowed-users` |
+
+### 3.4 Create a service account for the controller droplet
+
+The controller runs `op run` non-interactively and needs a service account token.
+
+1. Go to [1password.com](https://1password.com) → **Developer** → **Service Accounts** → **New Service Account**.
+2. Name it `do-snap-bot-controller`.
+3. Grant **read** access to `<your-vault>`.
+4. Copy the `ops_…` token — shown only once.
+
+> If your organization manages 1Password and you can't create service accounts, see [`docs/setup-op-fix.md`](setup-op-fix.md).
+
+---
+
+## Part 4 — Authenticate doctl and test the scripts
+
+### 4.1 Authenticate
 
 ```bash
 doctl auth init --context snaprestore
 ```
 
-When prompted, paste your DigitalOcean API token. The token is stored in `~/.config/doctl/config.yaml` (mode 0600) — it is never written to a script file or to shell history.
+Paste your `snaprestore-scripts` token when prompted. It is stored in `~/.config/doctl/config.yaml` (mode 0600) — never written to disk anywhere else.
 
-To replace the token later (e.g. if you rotated it):
-
-```bash
-doctl auth remove --context snaprestore
-doctl auth init --context snaprestore
-```
-
-Verify the context works:
+Verify:
 
 ```bash
 doctl auth switch --context snaprestore
 doctl compute droplet list
 ```
 
-### 2.2 Set the context in the scripts
+Both scripts already have `DOCTL_CONTEXT="snaprestore"` set — no script edits needed.
 
-Both `do-snapshot.sh` and `do-restore.sh` already have `DOCTL_CONTEXT="snaprestore"` set in their configuration block. No script edits are needed — authenticating the context in step 2.1 is sufficient.
-
----
-
-## Part 3 — 1Password
-
-### 3.1 Install and sign in to 1Password CLI
+To replace the token later (e.g. after rotating it):
 
 ```bash
-brew install 1password-cli
-op signin
+doctl auth remove --context snaprestore
+doctl auth init --context snaprestore
 ```
 
-Verify you are signed in:
-
-```bash
-op account list
-```
-
-### 3.2 Create a vault item for the snapshot scripts
-
-Store your DigitalOcean API token in a 1Password item:
-
-```bash
-op item create \
-  --category login \
-  --title "DigitalOcean API Token" \
-  --vault CDS_Vault \
-  "credential=dop_v1_YOUR_TOKEN_HERE"
-```
-
-The 1Password path for this item (shown in `.env.example` for reference) is:
-
-```
-op://CDS_Vault/DigitalOcean API Token/credential
-```
-
-Verify the path resolves:
-
-```bash
-op read "op://CDS_Vault/DigitalOcean API Token/credential"
-```
-
-### 3.3 Create a vault item for the Slack bot
-
-You will collect the Slack tokens in Part 7. Run the command below **after completing Part 7**, substituting the real values:
-
-```bash
-op item create \
-  --category login \
-  --title "do-snap-bot" \
-  --vault CDS_Vault \
-  "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
-  "slack-app-token=xapp-YOUR_APP_TOKEN" \
-  "signing-secret=YOUR_SIGNING_SECRET" \
-  "do-token=dop_v1_YOUR_BOT_DO_TOKEN" \
-  "allowed-users=U01AB2CD3,U04XY5EF6"
-```
-
-The resulting 1Password paths, which match `slack-bot/.env.op.example`:
-
-| Secret | 1Password path |
-|--------|---------------|
-| Slack bot token (`xoxb-…`) | `op://CDS_Vault/do-snap-bot/slack-bot-token` |
-| Slack app-level token (`xapp-…`) | `op://CDS_Vault/do-snap-bot/slack-app-token` |
-| Slack signing secret | `op://CDS_Vault/do-snap-bot/signing-secret` |
-| DigitalOcean API token | `op://CDS_Vault/do-snap-bot/do-token` |
-| Allowed user IDs | `op://CDS_Vault/do-snap-bot/allowed-users` |
-
-> **WARNING:** Never write raw tokens to `.env.op`, commit files containing secrets, or store tokens in shell history.
-
-### 3.4 Create a 1Password service account
-
-The controller droplet runs `op run` non-interactively. A service account token provides that access without exposing your personal 1Password credentials.
-
-1. Go to [1password.com](https://1password.com) → **Developer** → **Service Accounts** → **New Service Account**.
-2. Name it something descriptive (e.g., `do-snap-bot-controller`).
-3. Grant **read** access to the `CDS_Vault` vault (or a dedicated vault containing only the `do-snap-bot` item).
-4. Click **Generate Token** and copy the value (begins with `ops_`). **It is shown only once.**
-
-You will paste this token into `slack-bot/cloud-init/controller.yml` in Part 6.
-
----
-
-## Part 4 — Environment File Reference
-
-`.env.example` in the project root is a **reference document only**. It lists every environment variable the project uses and shows the `op://` path format for what should be stored in 1Password. You do not copy or use it directly.
-
-- **Scripts (`do-restore.sh`, `do-snapshot.sh`)** authenticate via the `snaprestore` doctl context. They do not use `.env` — run them directly (see Part 5).
-- **Slack bot** uses `slack-bot/.env.op` with `op run` (see Part 6). The `op://` paths in that file correspond to the 1Password items you created in Part 3.
-
----
-
-## Part 5 — Testing the Scripts
-
-### 5.1 Dry-run (no API writes)
-
-```bash
-./do-snapshot.sh --dry-run
-./do-restore.sh --dry-run
-```
-
-Both commands print every operation that would run — no API calls are made. This is the safest way to verify your setup before running for real.
-
-### 5.2 List resources without acting
-
-```bash
-DROPLET_ID=list ./do-snapshot.sh     # list all droplets, then exit
-SNAPSHOT_ID=list ./do-restore.sh     # list all snapshots, then exit
-SSH_KEY_ID=list  ./do-restore.sh     # list SSH keys
-RESERVED_IP=list ./do-restore.sh     # list reserved IPs
-```
-
-### 5.3 Full snapshot test
+### 4.2 Test do-snapshot.sh
 
 ```bash
 ./do-snapshot.sh
 ```
 
-1. Select a droplet from the interactive list.
-2. Accept the default snapshot name or enter a custom one.
-3. Confirm. The script gracefully shuts down the droplet, creates the snapshot (several minutes), then asks what to do with the droplet: **start**, **leave** (shut down, billing continues), or **delete**.
+Walk through the prompts: select a droplet, confirm shutdown, name the snapshot, then choose what to do with the droplet (start / leave / delete). Use `--log snapshot.log` to capture full output.
 
-### 5.4 Full restore test
+### 4.3 Test do-restore.sh
 
 ```bash
 ./do-restore.sh
 ```
 
-1. Select a snapshot from the list.
-2. Choose a droplet size (must meet the snapshot's minimum disk size).
-3. Optionally attach an SSH key.
-4. Optionally assign a reserved IP.
-5. Confirm. The script creates the new droplet, waits for it to become active, and assigns the reserved IP.
+Select a snapshot, choose a size, optionally attach an SSH key and assign a reserved IP, then confirm. Use `--log restore.log` to capture full output.
+
+**Stop here if you don't need the Slack bot.**
 
 ---
 
-## Part 6 — Controller Droplet
+## Part 5 — Create the Slack app
 
-The Slack bot runs on a dedicated **$6/mo DigitalOcean droplet** (1 vCPU, 1 GB RAM). Cloud-init provisions all dependencies automatically.
+### 5.1 Create a dedicated channel
 
-### 6.1 Prepare cloud-init/controller.yml
+In Slack, create a channel — e.g. `#do-ops`. Invite anyone who should be able to run commands.
 
-Open `slack-bot/cloud-init/controller.yml` and replace both placeholders:
-
-| Placeholder | Replace with |
-|-------------|-------------|
-| `<YOUR_SSH_PUBLIC_KEY>` | Your SSH public key (`cat ~/.ssh/id_ed25519.pub`) |
-| `<OP_SERVICE_ACCOUNT_TOKEN>` | The service account token from Part 3.4 |
-
-> **WARNING:** Do not commit `controller.yml` after filling in the service account token. Work from a local copy — the file is in `.gitignore`.
-
-### 6.2 Create the controller droplet
-
-1. Log in to [cloud.digitalocean.com](https://cloud.digitalocean.com).
-2. Go to **Droplets** → **Create Droplet**.
-3. Configure the droplet:
-   - **Image:** Ubuntu 22.04 (LTS) x64
-   - **Size:** Basic → Regular CPU → **$6/mo** (1 vCPU, 1 GB RAM, 25 GB SSD)
-   - **Region:** Any — match the region of your other droplets for lowest latency
-   - **Authentication:** SSH Key — select or add your key
-4. Expand **Advanced Options** → enable **Add Initialization scripts (free)** → paste the full contents of your edited `controller.yml`.
-5. Click **Create Droplet**.
-
-Cloud-init takes **3–5 minutes**. Monitor progress:
-
-```bash
-ssh dosnap@<controller-ip> "sudo tail -f /var/log/cloud-init-output.log"
-```
-
-### 6.3 Verify the droplet
-
-```bash
-ssh dosnap@<controller-ip>
-doctl version      # should print the doctl version
-op --version       # should print the 1Password CLI version
-uv --version       # should print the uv version
-```
-
-### 6.4 Deploy the bot
-
-```bash
-# From your local machine — sync the bot code to the controller:
-rsync -av slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
-
-# On the controller:
-ssh dosnap@<controller-ip>
-cd /opt/do-snap-bot
-cp .env.op.example .env.op
-# Verify the op:// paths in .env.op match what you created in Part 3.3
-sudo systemctl start do-snap-bot
-sudo journalctl -u do-snap-bot -f
-```
-
-You should see `⚡️ Bolt app is running!` in the logs within a few seconds of starting.
-
-### 6.5 Manage the service
-
-```bash
-sudo systemctl status do-snap-bot      # current status
-sudo systemctl restart do-snap-bot     # restart after code changes
-sudo systemctl stop do-snap-bot        # stop
-sudo journalctl -u do-snap-bot -n 100  # last 100 log lines
-sudo journalctl -u do-snap-bot -f      # follow live logs
-```
-
----
-
-## Part 7 — Slack App Setup
-
-### 7.1 Create a dedicated channel
-
-In Slack, create a channel for bot operations — e.g., `#do-ops` or `#deploys`. Invite team members who should have access.
-
-### 7.2 Create the Slack app from a manifest
+### 5.2 Create the app from the manifest
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**.
-2. Select your Slack workspace.
-3. Paste the full contents of `slack-bot/manifest.yml` into the **YAML** tab. Click **Next** → **Create**.
+2. Select your workspace.
+3. Paste the contents of `slack-bot/manifest.yml` into the YAML tab → **Next** → **Create**.
 
-### 7.3 Enable Socket Mode and get the app-level token
+### 5.3 Enable Socket Mode and get the app-level token
 
-1. In the app settings sidebar, go to **Settings** → **Socket Mode**.
-2. Toggle **Enable Socket Mode** to **On**.
-3. Under **App-Level Tokens**, click **Generate** (or **Add**).
-4. Name the token (e.g., `socket-token`) and add the scope `connections:write`.
-5. Click **Generate**.
-6. Copy the token beginning with `xapp-` — this is your **`SLACK_APP_TOKEN`**.
+1. Sidebar → **Settings** → **Socket Mode** → toggle **On**.
+2. Under **App-Level Tokens** → **Generate** → name it `socket-token`, add scope `connections:write` → **Generate**.
+3. Copy the `xapp-…` token — this is `SLACK_APP_TOKEN`.
 
-### 7.4 Install the app to your workspace and get the bot token
+### 5.4 Install the app and get the bot token
 
-1. In the app settings sidebar, go to **Settings** → **Install App**.
-2. Click **Install to Workspace** → **Allow**.
-3. Copy the **Bot User OAuth Token** beginning with `xoxb-` — this is your **`SLACK_BOT_TOKEN`**.
+1. Sidebar → **Settings** → **Install App** → **Install to Workspace** → **Allow**.
+2. Copy the `xoxb-…` token — this is `SLACK_BOT_TOKEN`.
 
-### 7.5 Copy the signing secret
+### 5.5 Copy the signing secret
 
-1. In the app settings sidebar, go to **Settings** → **Basic Information** → **App Credentials**.
-2. Click **Show** next to **Signing Secret** and copy the value — this is your **`SLACK_SIGNING_SECRET`**.
+1. Sidebar → **Basic Information** → **App Credentials**.
+2. Click **Show** next to **Signing Secret** — this is `SLACK_SIGNING_SECRET`.
 
-### 7.6 Invite the bot to your channel
-
-In Slack, open your `#do-ops` channel and run:
+### 5.6 Invite the bot to your channel
 
 ```
 /invite @DO Snap Bot
 ```
 
-### 7.7 Find your Slack user ID (for the allow-list)
+### 5.7 Get your Slack user ID
 
-1. In Slack, click any team member's name to open their profile.
-2. Click the **⋮** (More actions) menu → **Copy member ID**.
-3. Repeat for each person who should be able to run slash commands.
-4. The format is `U01AB2CD3,U04XY5EF6` — comma-separated, no spaces.
+Click your name in Slack → **⋮ More actions** → **Copy member ID**. Repeat for each operator. Format: `U01AB2CD3,U04XY5EF6`.
 
-### 7.8 Store tokens in 1Password
+### 5.8 Store secrets in 1Password
 
-Now that you have all the values, run the `op item create` command from Part 3.3:
-
-```bash
-op item create \
-  --category login \
-  --title "do-snap-bot" \
-  --vault CDS_Vault \
-  "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
-  "slack-app-token=xapp-YOUR_APP_TOKEN" \
-  "signing-secret=YOUR_SIGNING_SECRET" \
-  "do-token=dop_v1_YOUR_BOT_DO_TOKEN" \
-  "allowed-users=U01AB2CD3,U04XY5EF6"
-```
-
-Then update `.env.op` on the controller droplet to use the `op://` paths listed in Part 3.3, and restart the bot:
-
-```bash
-sudo systemctl restart do-snap-bot
-sudo journalctl -u do-snap-bot -f
-```
-
-### 7.9 Test in Slack
-
-In your `#do-ops` channel:
-
-```
-/do-snapshot                          → lists droplets or begins a snapshot job
-/do-restore                           → lists recent snapshots
-/do-restore web-server-20260526       → restore a specific snapshot by name or ID
-/do-deploy-cancel abc123              → cancel a running job by its job ID
-```
+You now have all five values. Run the command from Part 3.3.
 
 ---
 
-## Quick Reference
+## Part 6 — Deploy the Slack bot
 
-### All variables at a glance
+### 6.1 Edit controller.yml
 
-| Variable | Where it lives | Description |
-|----------|----------------|-------------|
-| `DIGITALOCEAN_ACCESS_TOKEN` | `slack-bot/.env.op`, 1Password | DigitalOcean API token (Slack bot only — scripts use doctl context) |
-| `DOCTL_CONTEXT` | Script config block (`snaprestore`) | doctl auth context name |
-| `OP_SERVICE_ACCOUNT_TOKEN` | `/etc/do-snap-bot/env` on controller | 1Password service account token |
-| `SLACK_BOT_TOKEN` | `slack-bot/.env.op` | `xoxb-…` bot user OAuth token |
-| `SLACK_APP_TOKEN` | `slack-bot/.env.op` | `xapp-…` socket mode app token |
-| `SLACK_SIGNING_SECRET` | `slack-bot/.env.op` | Slack request signing secret |
-| `SLACK_ALLOWED_USERS` | `slack-bot/.env.op` | Comma-separated Slack member IDs |
+Open `slack-bot/cloud-init/controller.yml` and replace both placeholders:
 
-### Token loading order (both scripts)
+| Placeholder | Value |
+|-------------|-------|
+| `<YOUR_SSH_PUBLIC_KEY>` | Output of `cat ~/.ssh/id_ed25519.pub` |
+| `<OP_SERVICE_ACCOUNT_TOKEN>` | The `ops_…` token from Part 3.4 |
 
-The scripts authenticate via the `snaprestore` doctl context and do not require any environment variables. The full resolution order if you ever override via `OP_ITEM`:
+> **Do not commit `controller.yml` after editing** — it contains a live service account token.
 
-1. `OP_ITEM` config var → calls `op read` if the `op` CLI is present
-2. `DOCTL_CONTEXT` → doctl uses its stored context token (default path)
+Check for non-ASCII characters before deploying (these silently break cloud-init):
+
+```bash
+LC_ALL=C grep -n '[^ -~]' slack-bot/cloud-init/controller.yml
+```
+
+No output = clean.
+
+### 6.2 Create the controller droplet
+
+Use `doctl` — do not paste `controller.yml` into the DO console UI (browser paste can introduce invisible characters that break YAML parsing):
+
+```bash
+doctl compute ssh-key list                    # find your key ID
+doctl compute droplet create do-snap-bot-controller \
+  --image ubuntu-22-04-x64 \
+  --size s-1vcpu-1gb \
+  --region nyc1 \
+  --ssh-keys <your-key-id> \
+  --user-data-file slack-bot/cloud-init/controller.yml \
+  --wait
+```
+
+### 6.3 Verify cloud-init completed
+
+```bash
+ssh -i ~/.ssh/<your-ssh-key> root@<controller-ip> "cloud-init status"
+# Expected: status: done
+
+ssh -i ~/.ssh/<your-ssh-key> dosnap@<controller-ip>
+# If this fails, dosnap was not created — see docs/troubleshooting.md
+```
+
+Once in as dosnap, verify tools:
+
+```bash
+doctl version && op --version && uv --version
+```
+
+### 6.4 Fix /opt/do-snap-bot permissions (if needed)
+
+If cloud-init didn't create the directory, do it as root:
+
+```bash
+ssh -i ~/.ssh/<your-ssh-key> root@<controller-ip> \
+  "mkdir -p /opt/do-snap-bot && chown dosnap:dosnap /opt/do-snap-bot"
+```
+
+### 6.5 Deploy the bot code
+
+From your local machine:
+
+```bash
+rsync -av -e "ssh -i ~/.ssh/<your-ssh-key>" slack-bot/ dosnap@<controller-ip>:/opt/do-snap-bot/
+```
+
+### 6.6 Configure and start
+
+On the controller:
+
+```bash
+ssh -i ~/.ssh/<your-ssh-key> dosnap@<controller-ip>
+cd /opt/do-snap-bot
+cp .env.op.example .env.op
+nano .env.op   # update op:// paths to match your vault name
+```
+
+Verify secrets resolve before starting:
+
+```bash
+# On your local machine (where you're signed in to 1Password):
+op read "op://<your-vault>/do-snap-bot/slack-bot-token"
+op read "op://<your-vault>/do-snap-bot/do-token"
+```
+
+Start the service (as root):
+
+```bash
+ssh -i ~/.ssh/<your-ssh-key> root@<controller-ip> "systemctl start do-snap-bot"
+```
+
+Check it's running:
+
+```bash
+ssh -i ~/.ssh/<your-ssh-key> root@<controller-ip> "systemctl status do-snap-bot"
+```
+
+### 6.7 Test in Slack
+
+In `#do-ops`:
+
+```
+/do-snapshot      → lists your droplets; walk through the snapshot flow
+/do-restore       → lists recent snapshots; walk through the restore flow
+```
+
+If the bot doesn't respond, see [docs/troubleshooting.md](troubleshooting.md).

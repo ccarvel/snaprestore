@@ -82,11 +82,11 @@ Declares:
 Template for the `op://` references used by `start.sh`. Copy to `.env.op` and verify the vault paths match what you created in 1Password. **Never write raw token values into this file or `.env.op`.**
 
 ```
-SLACK_BOT_TOKEN=op://CDS_Vault/do-snap-bot/slack-bot-token
-SLACK_APP_TOKEN=op://CDS_Vault/do-snap-bot/slack-app-token
-SLACK_SIGNING_SECRET=op://CDS_Vault/do-snap-bot/signing-secret
-DIGITALOCEAN_ACCESS_TOKEN=op://CDS_Vault/do-snap-bot/do-token
-SLACK_ALLOWED_USERS=op://CDS_Vault/do-snap-bot/allowed-users
+SLACK_BOT_TOKEN=op://<your-vault>/do-snap-bot/slack-bot-token
+SLACK_APP_TOKEN=op://<your-vault>/do-snap-bot/slack-app-token
+SLACK_SIGNING_SECRET=op://<your-vault>/do-snap-bot/signing-secret
+DIGITALOCEAN_ACCESS_TOKEN=op://<your-vault>/do-snap-bot/do-token
+SLACK_ALLOWED_USERS=op://<your-vault>/do-snap-bot/allowed-users
 ```
 
 ### `start.sh`
@@ -220,7 +220,7 @@ Now that you have all the values from Step 1, create a single 1Password item hol
 op item create \
   --category login \
   --title "do-snap-bot" \
-  --vault CDS_Vault \
+  --vault <your-vault> \
   "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
   "slack-app-token=xapp-YOUR_APP_TOKEN" \
   "signing-secret=YOUR_SIGNING_SECRET" \
@@ -232,11 +232,11 @@ The resulting 1Password paths, which match `.env.op.example`:
 
 | Secret | 1Password path |
 |--------|---------------|
-| Slack bot token (`xoxb-…`) | `op://CDS_Vault/do-snap-bot/slack-bot-token` |
-| Slack app-level token (`xapp-…`) | `op://CDS_Vault/do-snap-bot/slack-app-token` |
-| Slack signing secret | `op://CDS_Vault/do-snap-bot/signing-secret` |
-| DigitalOcean API token | `op://CDS_Vault/do-snap-bot/do-token` |
-| Allowed user IDs | `op://CDS_Vault/do-snap-bot/allowed-users` |
+| Slack bot token (`xoxb-…`) | `op://<your-vault>/do-snap-bot/slack-bot-token` |
+| Slack app-level token (`xapp-…`) | `op://<your-vault>/do-snap-bot/slack-app-token` |
+| Slack signing secret | `op://<your-vault>/do-snap-bot/signing-secret` |
+| DigitalOcean API token | `op://<your-vault>/do-snap-bot/do-token` |
+| Allowed user IDs | `op://<your-vault>/do-snap-bot/allowed-users` |
 
 > **WARNING:** Never write raw tokens to `.env.op`, commit files containing secrets, or store tokens in shell history.
 
@@ -246,7 +246,7 @@ The controller droplet runs `op run` non-interactively. A service account token 
 
 1. Go to [1password.com](https://1password.com) → **Developer** → **Service Accounts** → **New Service Account**.
 2. Name it something descriptive (e.g., `do-snap-bot-controller`).
-3. Grant **read** access to the `CDS_Vault` vault (or a dedicated vault containing only the `do-snap-bot` item).
+3. Grant **read** access to the `<your-vault>` vault (or a dedicated vault containing only the `do-snap-bot` item).
 4. Click **Generate Token** and copy the value (begins with `ops_`). **It is shown only once.**
 
 You will paste this token into `cloud-init/controller.yml` in Step 3.
