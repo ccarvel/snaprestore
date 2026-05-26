@@ -207,7 +207,16 @@ ui_confirm "Proceed with snapshot?" || { ui_info "Aborted."; exit 0; }
 
 # ── shutdown ──────────────────────────────────────────────────────────────────
 
+SKIP_SHUTDOWN=false
 if [[ "$DROPLET_STATUS" == "active" ]]; then
+  echo ""
+  ui_confirm "Shut down droplet before snapshotting? (recommended for consistency)" "Y" || SKIP_SHUTDOWN=true
+  if [[ "$SKIP_SHUTDOWN" == true ]]; then
+    ui_warn "Snapshotting a running droplet — result may not be crash-consistent."
+  fi
+fi
+
+if [[ "$DROPLET_STATUS" == "active" && "$SKIP_SHUTDOWN" == false ]]; then
   echo ""
   CURRENT_OP="shutdown droplet $DROPLET_ID ($DROPLET_NAME)"
 
@@ -250,7 +259,7 @@ if [[ "$DROPLET_STATUS" == "active" ]]; then
     rm -f "$local_tmpfile"
   fi
   CURRENT_OP=""
-else
+elif [[ "$DROPLET_STATUS" != "active" ]]; then
   ui_info "Droplet is already off."
 fi
 
