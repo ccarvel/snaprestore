@@ -34,6 +34,7 @@ Go to [cloud.digitalocean.com/account/api/tokens](https://cloud.digitalocean.com
 | `droplet:create` | `do-restore.sh` |
 | `droplet:update` | `do-snapshot.sh` — shutdown, power-off, snapshot action |
 | `droplet:delete` | `do-snapshot.sh` — delete after snapshot (optional) |
+| `image:create` | Both — snapshot creation goes through the images API |
 | `snapshot:read` | Both scripts |
 | `snapshot:delete` | `do-snapshot.sh` — prune old snapshots |
 | `ssh_key:read` | `do-restore.sh` — attach SSH key at creation |
