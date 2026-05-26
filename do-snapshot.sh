@@ -4,13 +4,15 @@ set -Eeuo pipefail
 #-----------------------------------------
 # CONFIGURATION - Set these or use "list" to fetch
 #-----------------------------------------
-DO_TOKEN=""                 # Optional: prefer DO_API_TOKEN, DIGITALOCEAN_ACCESS_TOKEN, or OP_DO_TOKEN_REF
-OP_DO_TOKEN_REF=""          # Optional: 1Password secret reference, for example op://Vault/Item/credential
-DOCTL_CONTEXT=""            # Optional: doctl auth context name
-DROPLET_ID=""               # Use "list" to see available droplets
-SNAPSHOT_NAME=""            # Optional: defaults to {droplet-name}-snapshot-{date}
-POST_ACTION=""              # Optional: start, leave, or delete
-LOG_FILE=""                 # Optional: defaults off; use --log-file or set path
+DO_TOKEN="${DO_TOKEN:-}"                 # Optional: prefer DO_API_TOKEN, DIGITALOCEAN_ACCESS_TOKEN, or OP_DO_TOKEN_REF
+OP_DO_TOKEN_REF="${OP_DO_TOKEN_REF:-}"   # Optional: 1Password secret reference, for example op://Vault/Item/credential
+DOCTL_CONTEXT="${DOCTL_CONTEXT:-}"       # Optional: doctl auth context name
+DROPLET_ID="${DROPLET_ID:-}"             # Use "list" to see available droplets
+SNAPSHOT_NAME="${SNAPSHOT_NAME:-}"       # Optional: defaults to {droplet-name}-snapshot-{date}
+POST_ACTION="${POST_ACTION:-}"           # Optional: start, leave, or delete
+LOG_FILE="${LOG_FILE:-}"                 # Optional: defaults off; use --log-file or set path
+SNAPRESTORE_YES="${SNAPRESTORE_YES:-0}"
+SNAPRESTORE_DELETE_CONFIRM_NAME="${SNAPRESTORE_DELETE_CONFIRM_NAME:-}"
 POLL_TIMEOUT_SECONDS=900
 HTTP_RETRY_MAX=5
 #-----------------------------------------
@@ -41,6 +43,7 @@ Options:
   --ui auto|gum|fzf|plain
                        Choose UI mode. Default: auto.
   --no-install          Do not offer to install optional UI tools.
+  --yes                 Confirm non-destructive prompts for automation.
   --help                Show this help text.
 
 Config variables still supported:
@@ -65,6 +68,7 @@ while [ "$#" -gt 0 ]; do
       UI_MODE="$1"
       ;;
     --no-install) NO_INSTALL=1 ;;
+    --yes) SNAPRESTORE_YES=1 ;;
     --log-file)
       shift
       if [ "$#" -eq 0 ]; then
@@ -261,6 +265,9 @@ ensure_ui() {
 
 confirm_yes() {
   local prompt="$1"
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    return 0
+  fi
   if [ "$HAS_GUM" = "yes" ]; then
     if gum confirm "$prompt"; then
       return 0
@@ -399,6 +406,11 @@ confirm_exact() {
   local prompt="$1"
   local expected="$2"
   local actual=""
+  if [ -n "$SNAPRESTORE_DELETE_CONFIRM_NAME" ]; then
+    actual="$SNAPRESTORE_DELETE_CONFIRM_NAME"
+    [ "$actual" = "$expected" ]
+    return $?
+  fi
   printf '%s' "$prompt" >&2
   IFS= read -r actual || die "Confirmation cancelled"
   [ "$actual" = "$expected" ]

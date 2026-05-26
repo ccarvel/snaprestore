@@ -311,6 +311,107 @@ uvx docker-autocompose container_name
 6. Assign the same reserved IP.
 7. SSH to the final connection target printed by the script.
 
+## Slack Control Plane
+
+The repo includes an optional Slack-to-GitHub control plane:
+
+- Slack slash commands are defined in `slack/app/manifest.yaml`.
+- A Cloudflare Worker in `slack/cloudflare-worker/worker.js` verifies Slack signatures, checks an allow-list of Slack user IDs, posts the first threaded Slack message, triggers GitHub Actions, and cancels in-flight runs.
+- `.github/workflows/snaprestore-dispatch.yml` runs the scripts non-interactively and posts final status back to the Slack thread.
+
+### Architecture
+
+```text
+Slack slash command
+  -> Cloudflare Worker
+  -> GitHub Actions workflow_dispatch
+  -> do-snapshot.sh or do-restore.sh
+  -> Slack thread updates
+```
+
+This avoids a new always-on controller Droplet. GitHub Actions is the execution environment, while the Worker exists only to satisfy Slack's 3-second acknowledgement window and verify request signatures.
+
+### Slack Commands
+
+Snapshot:
+
+```text
+/do-snapshot droplet_id=123456789 snapshot_name=dh-web-20260526 post_action=leave
+```
+
+Snapshot and delete:
+
+```text
+/do-snapshot droplet_id=123456789 snapshot_name=dh-web-20260526 post_action=delete confirm_delete_name=dh-web
+```
+
+Restore:
+
+```text
+/do-restore snapshot_id=123456789 restore_region=nyc3 size_slug=s-2vcpu-4gb droplet_name=dh-web reserved_ip=203.0.113.25 tags=brown-dh,on-demand
+```
+
+Restore with the included welcome page:
+
+```text
+/do-restore snapshot_id=123456789 restore_region=nyc3 size_slug=s-2vcpu-4gb droplet_name=dh-web reserved_ip=203.0.113.25 user_data_file=slack/welcome-page/cloud-init.yaml
+```
+
+Cancel:
+
+```text
+/do-deploy-cancel <job_id>
+```
+
+### 1Password Secret Paths
+
+Create these 1Password items in an `Automation` vault:
+
+```text
+op://Automation/DigitalOcean API Token/credential
+op://Automation/Snaprestore Slack Signing Secret/credential
+op://Automation/Snaprestore Slack Bot Token/credential
+op://Automation/Snaprestore Slack Allowed User IDs/credential
+op://Automation/Snaprestore GitHub Token/credential
+```
+
+The GitHub workflow loads `DO_API_TOKEN` and `SLACK_BOT_TOKEN` via the 1Password service account action. Add this GitHub repository secret:
+
+```text
+OP_SERVICE_ACCOUNT_TOKEN
+```
+
+The Cloudflare Worker cannot call `op read` directly at request time. Load Worker secrets from 1Password during deployment:
+
+```bash
+cd slack/cloudflare-worker
+op read 'op://Automation/Snaprestore Slack Signing Secret/credential' | wrangler secret put SLACK_SIGNING_SECRET
+op read 'op://Automation/Snaprestore Slack Bot Token/credential' | wrangler secret put SLACK_BOT_TOKEN
+op read 'op://Automation/Snaprestore Slack Allowed User IDs/credential' | wrangler secret put SLACK_ALLOWED_USER_IDS
+op read 'op://Automation/Snaprestore GitHub Token/credential' | wrangler secret put GITHUB_TOKEN
+wrangler deploy
+```
+
+The GitHub token needs permission to dispatch and cancel Actions runs in this repository. The Slack bot token needs `chat:write`, `commands`, and `users:read`.
+
+### Slack App Setup
+
+1. Create a Slack app from `slack/app/manifest.yaml`.
+2. Set each slash command request URL to the deployed Cloudflare Worker URL.
+3. Install the app to your workspace.
+4. Store the signing secret and bot token in 1Password using the paths above.
+5. Deploy Worker secrets with `op read ... | wrangler secret put ...`.
+
+### Welcome Page / Health Check
+
+`slack/welcome-page/cloud-init.yaml` installs nginx and writes a single-file readiness page showing:
+
+- Droplet hostname
+- Restore timestamp
+- Public IP from DigitalOcean metadata
+
+When a restore job finishes, GitHub Actions polls `http://<connect_ip>/` for up to five minutes and posts `ready` to the Slack thread only after HTTP 200. If the page or service does not become reachable in time, the thread says the Droplet is active but HTTP readiness did not pass.
+
 ## Troubleshooting
 
 ### `Required command not found`

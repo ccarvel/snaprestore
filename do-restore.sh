@@ -4,18 +4,21 @@ set -Eeuo pipefail
 #-----------------------------------------
 # CONFIGURATION - Set these or use "list" to fetch
 #-----------------------------------------
-DO_TOKEN=""                 # Optional: prefer DO_API_TOKEN, DIGITALOCEAN_ACCESS_TOKEN, or OP_DO_TOKEN_REF
-OP_DO_TOKEN_REF=""          # Optional: 1Password secret reference, for example op://Vault/Item/credential
-DOCTL_CONTEXT=""            # Optional: doctl auth context name
-SNAPSHOT_ID=""              # Use "list" to see available snapshots
-SSH_KEY_ID=""               # Use "list" to see available SSH keys; comma-separated IDs are accepted
-SIZE_SLUG=""                # Use "list" to see available sizes after setting SNAPSHOT_ID
-DROPLET_NAME=""             # Optional: defaults to restored-{snapshot}-{date}
-RESERVED_IP=""              # Use "list" to see reserved IPs, or set IP to assign
-TAGS=""                     # Optional: comma-separated tag names
-VPC_UUID=""                 # Optional: use "list" to see VPCs
-USER_DATA_FILE=""           # Optional: cloud-init or shell script file for first boot
-LOG_FILE=""                 # Optional: defaults off; use --log-file or set path
+DO_TOKEN="${DO_TOKEN:-}"                 # Optional: prefer DO_API_TOKEN, DIGITALOCEAN_ACCESS_TOKEN, or OP_DO_TOKEN_REF
+OP_DO_TOKEN_REF="${OP_DO_TOKEN_REF:-}"   # Optional: 1Password secret reference, for example op://Vault/Item/credential
+DOCTL_CONTEXT="${DOCTL_CONTEXT:-}"       # Optional: doctl auth context name
+SNAPSHOT_ID="${SNAPSHOT_ID:-}"           # Use "list" to see available snapshots
+RESTORE_REGION="${RESTORE_REGION:-}"     # Optional: required for non-interactive multi-region snapshots
+SSH_KEY_ID="${SSH_KEY_ID:-}"             # Use "list" to see available SSH keys; comma-separated IDs are accepted
+SIZE_SLUG="${SIZE_SLUG:-}"               # Use "list" to see available sizes after setting SNAPSHOT_ID
+DROPLET_NAME="${DROPLET_NAME:-}"         # Optional: defaults to restored-{snapshot}-{date}
+RESERVED_IP="${RESERVED_IP:-}"           # Use "list" to see reserved IPs, or set IP to assign
+TAGS="${TAGS:-}"                         # Optional: comma-separated tag names
+VPC_UUID="${VPC_UUID:-}"                 # Optional: use "list" to see VPCs
+USER_DATA_FILE="${USER_DATA_FILE:-}"     # Optional: cloud-init or shell script file for first boot
+LOG_FILE="${LOG_FILE:-}"                 # Optional: defaults off; use --log-file or set path
+SNAPRESTORE_YES="${SNAPRESTORE_YES:-0}"
+SNAPRESTORE_REASSIGN_RESERVED_IP="${SNAPRESTORE_REASSIGN_RESERVED_IP:-0}"
 POLL_TIMEOUT_SECONDS=900
 HTTP_RETRY_MAX=5
 #-----------------------------------------
@@ -47,10 +50,11 @@ Options:
   --ui auto|gum|fzf|plain
                        Choose UI mode. Default: auto.
   --no-install          Do not offer to install optional UI tools.
+  --yes                 Confirm non-destructive prompts for automation.
   --help                Show this help text.
 
 Config variables still supported:
-  DO_TOKEN, OP_DO_TOKEN_REF, DOCTL_CONTEXT, SNAPSHOT_ID, SSH_KEY_ID, SIZE_SLUG,
+  DO_TOKEN, OP_DO_TOKEN_REF, DOCTL_CONTEXT, SNAPSHOT_ID, RESTORE_REGION, SSH_KEY_ID, SIZE_SLUG,
   DROPLET_NAME, RESERVED_IP, TAGS, VPC_UUID, USER_DATA_FILE
 
 Set SNAPSHOT_ID, SSH_KEY_ID, SIZE_SLUG, RESERVED_IP, or VPC_UUID to "list" or "get"
@@ -73,6 +77,7 @@ while [ "$#" -gt 0 ]; do
       UI_MODE="$1"
       ;;
     --no-install) NO_INSTALL=1 ;;
+    --yes) SNAPRESTORE_YES=1 ;;
     --log-file)
       shift
       if [ "$#" -eq 0 ]; then
@@ -272,6 +277,9 @@ ensure_ui() {
 
 confirm_yes() {
   local prompt="$1"
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    return 0
+  fi
   if [ "$HAS_GUM" = "yes" ]; then
     if gum confirm "$prompt"; then
       return 0
@@ -521,7 +529,15 @@ if [ -z "$SNAPSHOT_REGION_LIST" ]; then
   die "Snapshot has no available regions"
 fi
 
-if printf '%s' "$SNAPSHOT_REGION_LIST" | grep -q ','; then
+if [ -n "$RESTORE_REGION" ]; then
+  if ! printf '%s' "$SNAPSHOT_REGION_LIST" | tr ',' '\n' | grep -qx "$RESTORE_REGION"; then
+    die "Snapshot is not available in requested RESTORE_REGION: $RESTORE_REGION"
+  fi
+  SELECTED_REGION="$RESTORE_REGION"
+elif printf '%s' "$SNAPSHOT_REGION_LIST" | grep -q ','; then
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    die "RESTORE_REGION is required for non-interactive multi-region snapshots"
+  fi
   REGION_OPTIONS=()
   OLD_IFS="$IFS"
   IFS=','
@@ -560,7 +576,9 @@ fi
 say "Selected size: $SIZE_SLUG"
 
 if [ -z "$SSH_KEY_ID" ]; then
-  if confirm_yes "Does this droplet require SSH keys?"; then
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    say "No SSH key selected."
+  elif confirm_yes "Does this droplet require SSH keys?"; then
     status_line INFO "Fetching SSH keys..."
     KEYS_JSON="$(doctl_json compute ssh-key list)"
     KEY_OPTIONS=()
@@ -583,7 +601,9 @@ else
 fi
 
 if [ -z "$RESERVED_IP" ]; then
-  if confirm_yes "Assign a reserved IP?"; then
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    RESERVED_IP=""
+  elif confirm_yes "Assign a reserved IP?"; then
     status_line INFO "Fetching reserved IPs..."
     RESERVED_IPS_JSON="$(doctl_json compute reserved-ip list)"
     IP_OPTIONS=()
@@ -614,8 +634,12 @@ if [ -n "$RESERVED_IP" ]; then
   fi
   if [ -n "$RESERVED_IP_DROPLET" ] && [ "$RESERVED_IP_DROPLET" != "null" ]; then
     warn "Reserved IP $RESERVED_IP is currently assigned to droplet $RESERVED_IP_DROPLET."
-    printf 'Type reassign to move this reserved IP: ' >&2
-    IFS= read -r REASSIGN_CONFIRM || die "Reserved IP reassignment cancelled"
+    if [ "$SNAPRESTORE_REASSIGN_RESERVED_IP" = "1" ]; then
+      REASSIGN_CONFIRM="reassign"
+    else
+      printf 'Type reassign to move this reserved IP: ' >&2
+      IFS= read -r REASSIGN_CONFIRM || die "Reserved IP reassignment cancelled"
+    fi
     if [ "$REASSIGN_CONFIRM" != "reassign" ]; then
       die "Reserved IP reassignment cancelled"
     fi
@@ -623,7 +647,9 @@ if [ -n "$RESERVED_IP" ]; then
 fi
 
 if [ -z "$VPC_UUID" ]; then
-  if confirm_yes "Select a non-default VPC?"; then
+  if [ "$SNAPRESTORE_YES" = "1" ]; then
+    VPC_UUID=""
+  elif confirm_yes "Select a non-default VPC?"; then
     VPCS_JSON="$(doctl_json vpcs list)"
     VPC_OPTIONS=()
     while IFS= read -r line; do

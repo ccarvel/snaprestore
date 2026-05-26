@@ -1,0 +1,46 @@
+#cloud-config
+package_update: true
+packages:
+  - nginx
+write_files:
+  - path: /usr/local/bin/snaprestore-welcome-page
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      host="$(hostname)"
+      restored_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      public_ip="$(curl -fsS --max-time 2 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address || true)"
+      {
+        printf '%s\n' '<!doctype html>'
+        printf '%s\n' '<html lang="en">'
+        printf '%s\n' '<head>'
+        printf '%s\n' '  <meta charset="utf-8">'
+        printf '%s\n' '  <meta name="viewport" content="width=device-width, initial-scale=1">'
+        printf '%s\n' '  <title>Snaprestore Ready</title>'
+        printf '%s\n' '  <style>'
+        printf '%s\n' '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 3rem; color: #111827; }'
+        printf '%s\n' '    main { max-width: 48rem; }'
+        printf '%s\n' '    h1 { font-size: 2rem; margin-bottom: 0.5rem; }'
+        printf '%s\n' '    dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.75rem; }'
+        printf '%s\n' '    dt { font-weight: 700; color: #374151; }'
+        printf '%s\n' '    dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }'
+        printf '%s\n' '  </style>'
+        printf '%s\n' '</head>'
+        printf '%s\n' '<body>'
+        printf '%s\n' '  <main>'
+        printf '%s\n' '    <h1>Snaprestore Ready</h1>'
+        printf '%s\n' '    <p>The restored Droplet is online and serving HTTP.</p>'
+        printf '%s\n' '    <dl>'
+        printf '%s\n' "      <dt>Hostname</dt><dd>${host}</dd>"
+        printf '%s\n' "      <dt>Restored at</dt><dd>${restored_at}</dd>"
+        printf '%s\n' "      <dt>Public IP</dt><dd>${public_ip:-unknown}</dd>"
+        printf '%s\n' '    </dl>'
+        printf '%s\n' '  </main>'
+        printf '%s\n' '</body>'
+        printf '%s\n' '</html>'
+      } > /var/www/html/index.html
+runcmd:
+  - [ systemctl, enable, nginx ]
+  - [ systemctl, restart, nginx ]
+  - [ /usr/local/bin/snaprestore-welcome-page ]

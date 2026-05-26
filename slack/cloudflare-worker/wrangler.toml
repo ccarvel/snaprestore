@@ -1,0 +1,9 @@
+name = "snaprestore-slack"
+main = "worker.js"
+compatibility_date = "2026-05-26"
+
+[vars]
+GITHUB_OWNER = "ccarvel"
+GITHUB_REPO = "snaprestore"
+GITHUB_REF = "next-codex"
+GITHUB_WORKFLOW_FILE = "snaprestore-dispatch.yml"

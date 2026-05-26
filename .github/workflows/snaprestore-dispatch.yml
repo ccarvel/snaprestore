@@ -1,0 +1,182 @@
+name: Snaprestore Dispatch
+run-name: snaprestore-${{ inputs.operation }}-${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+        type: string
+      operation:
+        required: true
+        type: choice
+        options:
+          - snapshot
+          - restore
+      slack_channel_id:
+        required: true
+        type: string
+      slack_thread_ts:
+        required: true
+        type: string
+      slack_user_id:
+        required: true
+        type: string
+      droplet_id:
+        required: false
+        type: string
+      snapshot_name:
+        required: false
+        type: string
+      post_action:
+        required: false
+        type: string
+      confirm_delete_name:
+        required: false
+        type: string
+      snapshot_id:
+        required: false
+        type: string
+      restore_region:
+        required: false
+        type: string
+      ssh_key_id:
+        required: false
+        type: string
+      size_slug:
+        required: false
+        type: string
+      droplet_name:
+        required: false
+        type: string
+      reserved_ip:
+        required: false
+        type: string
+      tags:
+        required: false
+        type: string
+      vpc_uuid:
+        required: false
+        type: string
+      user_data_file:
+        required: false
+        type: string
+      reassign_reserved_ip:
+        required: false
+        type: string
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+      DO_API_TOKEN: op://Automation/DigitalOcean API Token/credential
+      SLACK_BOT_TOKEN: op://Automation/Snaprestore Slack Bot Token/credential
+      INPUT_SLACK_CHANNEL_ID: ${{ inputs.slack_channel_id }}
+      INPUT_SLACK_THREAD_TS: ${{ inputs.slack_thread_ts }}
+      SNAPRESTORE_YES: "1"
+      SNAPRESTORE_REASSIGN_RESERVED_IP: ${{ inputs.reassign_reserved_ip == 'true' && '1' || '0' }}
+      SNAPRESTORE_DELETE_CONFIRM_NAME: ${{ inputs.confirm_delete_name }}
+      NO_COLOR: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure 1Password service account
+        uses: 1password/load-secrets-action/configure@v2
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load runtime secrets from 1Password
+        uses: 1password/load-secrets-action@v2
+        with:
+          export-env: true
+        env:
+          DO_API_TOKEN: op://Automation/DigitalOcean API Token/credential
+          SLACK_BOT_TOKEN: op://Automation/Snaprestore Slack Bot Token/credential
+
+      - name: Install dependencies
+        run: |
+          sudo snap install doctl
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Announce start
+        run: |
+          ./slack/post-update.sh "running ${{ inputs.operation }} job ${{ inputs.job_id }} for <@${{ inputs.slack_user_id }}>."
+
+      - name: Run snapshot
+        if: ${{ inputs.operation == 'snapshot' }}
+        env:
+          DROPLET_ID: ${{ inputs.droplet_id }}
+          SNAPSHOT_NAME: ${{ inputs.snapshot_name }}
+          POST_ACTION: ${{ inputs.post_action }}
+        run: |
+          if [ -z "$DROPLET_ID" ]; then
+            echo "droplet_id is required for snapshot" >&2
+            exit 2
+          fi
+          if [ -z "$POST_ACTION" ]; then
+            POST_ACTION="leave"
+          fi
+          output="$(DROPLET_ID="$DROPLET_ID" SNAPSHOT_NAME="$SNAPSHOT_NAME" POST_ACTION="$POST_ACTION" ./do-snapshot.sh --yes --no-install --ui plain --quiet --json)"
+          printf '%s\n' "$output" | tee snaprestore-result.json
+
+      - name: Run restore
+        if: ${{ inputs.operation == 'restore' }}
+        env:
+          SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+          RESTORE_REGION: ${{ inputs.restore_region }}
+          SSH_KEY_ID: ${{ inputs.ssh_key_id }}
+          SIZE_SLUG: ${{ inputs.size_slug }}
+          DROPLET_NAME: ${{ inputs.droplet_name }}
+          RESERVED_IP: ${{ inputs.reserved_ip }}
+          TAGS: ${{ inputs.tags }}
+          VPC_UUID: ${{ inputs.vpc_uuid }}
+          USER_DATA_FILE: ${{ inputs.user_data_file }}
+        run: |
+          if [ -z "$SNAPSHOT_ID" ] || [ -z "$SIZE_SLUG" ] || [ -z "$DROPLET_NAME" ]; then
+            echo "snapshot_id, size_slug, and droplet_name are required for restore" >&2
+            exit 2
+          fi
+          output="$(SNAPSHOT_ID="$SNAPSHOT_ID" RESTORE_REGION="$RESTORE_REGION" SSH_KEY_ID="$SSH_KEY_ID" SIZE_SLUG="$SIZE_SLUG" DROPLET_NAME="$DROPLET_NAME" RESERVED_IP="$RESERVED_IP" TAGS="$TAGS" VPC_UUID="$VPC_UUID" USER_DATA_FILE="$USER_DATA_FILE" ./do-restore.sh --yes --no-install --ui plain --quiet --json)"
+          printf '%s\n' "$output" | tee snaprestore-result.json
+
+      - name: Post success
+        if: ${{ success() }}
+        run: |
+          result="$(cat snaprestore-result.json)"
+          connect_ip="$(printf '%s\n' "$result" | jq -r '.connect_ip // empty')"
+          droplet_name="$(printf '%s\n' "$result" | jq -r '.droplet_name // empty')"
+          snapshot_name="$(printf '%s\n' "$result" | jq -r '.snapshot_name // empty')"
+          if [ "${{ inputs.operation }}" = "restore" ] && [ -n "$connect_ip" ]; then
+            url="http://${connect_ip}/"
+            ready="false"
+            for attempt in $(seq 1 30); do
+              if curl -fsS --max-time 5 "$url" >/dev/null; then
+                ready="true"
+                break
+              fi
+              sleep 10
+            done
+            if [ "$ready" = "true" ]; then
+              detail="ready: ${droplet_name:-droplet} at ${url}"
+            else
+              detail="droplet active but HTTP health check did not return 200 within 5 minutes: ${url}"
+            fi
+          elif [ -n "$connect_ip" ]; then
+            detail="complete: ${droplet_name:-droplet} at ${connect_ip}"
+          else
+            detail="complete: ${snapshot_name:-snapshot job}"
+          fi
+          ./slack/post-update.sh "$detail"$'\n'"job_id: ${{ inputs.job_id }}"
+
+      - name: Post failure
+        if: ${{ failure() }}
+        run: |
+          ./slack/post-update.sh "failed ${{ inputs.operation }} job ${{ inputs.job_id }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

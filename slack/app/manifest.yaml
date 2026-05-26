@@ -1,0 +1,33 @@
+display_information:
+  name: Snaprestore
+  description: Trigger DigitalOcean snapshot and restore jobs from Slack.
+  background_color: "#0f172a"
+features:
+  bot_user:
+    display_name: Snaprestore
+    always_online: false
+  slash_commands:
+    - command: /do-snapshot
+      description: Snapshot a DigitalOcean Droplet.
+      usage_hint: droplet_id=123 snapshot_name=name post_action=leave
+      should_escape: false
+    - command: /do-restore
+      description: Restore a DigitalOcean Droplet from a snapshot.
+      usage_hint: snapshot_id=123 size_slug=s-2vcpu-4gb reserved_ip=203.0.113.25
+      should_escape: false
+    - command: /do-deploy-cancel
+      description: Cancel an in-flight Snaprestore GitHub Actions job.
+      usage_hint: job_id
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - users:read
+settings:
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
