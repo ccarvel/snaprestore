@@ -2,6 +2,8 @@
 
 Two companion scripts for managing DigitalOcean droplet snapshots: create a snapshot from a running droplet, then restore a new droplet from that snapshot. Designed for cost-effective on-demand usage — snapshot and delete when idle, restore when needed, with the same reserved IP so DNS and Cloudflare configs remain valid.
 
+**Full setup guide (new users start here):** [`docs/setup-cc.md`](docs/setup-cc.md)
+
 ## Scripts
 
 | Script | Purpose |
@@ -524,6 +526,8 @@ brew install fzf
 
 Trigger snapshot and restore operations from Slack using slash commands. Runs as a Python Slack Bolt app in Socket Mode on a dedicated $6/mo DigitalOcean controller droplet.
 
+**Full Slack bot documentation:** [`slack-bot/README-slack-bot.md`](slack-bot/README-slack-bot.md)
+
 ### Commands
 
 | Command | Description |
@@ -658,11 +662,14 @@ snaprestore/
 ├── do-snapshot.sh            # Snapshot a droplet (shutdown → snapshot → start/leave/delete)
 ├── do-restore.sh             # Restore a droplet from snapshot + assign reserved IP
 ├── .env.example              # Environment variable reference with op:// examples (tracked)
+├── docs/
+│   └── setup-cc.md           # Complete setup guide (DO tokens, doctl, 1Password, Slack bot)
 ├── lib/
 │   ├── bootstrap_sh.sh       # UI bootstrap (gum detection, dependency checks)
 │   ├── ui_sh.sh              # Shell UI primitives (spinner, panel, choose, confirm)
 │   └── ui_rich_py.py         # Rich/gum UI layer (optional enhanced output)
 └── slack-bot/
+    ├── README-slack-bot.md   # Slack bot documentation (file breakdown, setup, operations)
     ├── bot.py                # Slack Bolt async app (Socket Mode)
     ├── pyproject.toml        # Python dependencies (slack-bolt, httpx)
     ├── manifest.yml          # Slack app manifest (paste at api.slack.com)
