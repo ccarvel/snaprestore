@@ -1,0 +1,26 @@
+{
+  "last_updated": "2026-05-26",
+  "last_session": "session 3 — Claude Code (next-cc)",
+  "git_sha": "fe5ec0c",
+  "worktree_state": "clean (only .omx/ untracked — not a project file)",
+  "current_focus": "No new work this session — consecutive handoff invocation. All docs from session 2 are committed and pushed (fe5ec0c). Ready for operator to begin live script testing.",
+  "exact_next_step": "Run `./do-snapshot.sh --dry-run` to validate the full script flow against the default doctl context — confirms token loading, droplet fetch, fzf/ANSI selector, and dry-run path all work before any live API writes.",
+  "blockers": [
+    {
+      "description": "Scripts not live-tested across either session — --dry-run has not been executed, no live DO API reads or writes have been performed.",
+      "severity": "medium",
+      "owner": "operator"
+    }
+  ],
+  "open_tasks": [
+    "Run ./do-snapshot.sh --dry-run and ./do-restore.sh --dry-run to confirm token loading + UI flow with default doctl context.",
+    "Decide whether DOCTL_CONTEXT=\"default\" stays hardcoded in the script config blocks or reverts to empty with operator expected to set it via env.",
+    "Install gum (bootstrap will prompt) and verify rich UI mode activates correctly.",
+    "Add SNAPSHOT_ID=list dispatch to do-snapshot.sh — currently only do-restore.sh supports snapshot listing.",
+    "Live-test a full snapshot + restore cycle on a disposable droplet before merging next-cc to main.",
+    "Live-test the Slack bot locally (./start.sh) once 1Password vault items are populated."
+  ],
+  "completed_this_session": [
+    "No code or doc changes — consecutive /relay-handoff invocation immediately after session 2. Session 3 is a boundary marker only."
+  ]
+}

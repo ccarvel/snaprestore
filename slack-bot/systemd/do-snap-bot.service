@@ -1,0 +1,29 @@
+[Unit]
+Description=DO Snap Bot — Slack DigitalOcean snapshot/restore controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dosnap
+Group=dosnap
+WorkingDirectory=/opt/do-snap-bot
+ExecStart=/opt/do-snap-bot/start.sh
+Restart=on-failure
+RestartSec=15s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=do-snap-bot
+
+# Secret injection happens inside start.sh via `op run`.
+# OP_SERVICE_ACCOUNT_TOKEN is the only secret that must be in the environment
+# before start.sh runs; it is loaded from the drooplet's credential file.
+EnvironmentFile=-/etc/do-snap-bot/env
+
+# Hard limits
+LimitNOFILE=65536
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,124 @@
+#cloud-config
+# Controller droplet for DO Snap Bot.
+# Paste into DigitalOcean "User Data" when creating the $6/mo droplet.
+#
+# Before launching: replace every <PLACEHOLDER> with real values.
+# WARNING: This file contains op:// references, not raw secrets. The 1Password
+# service account token in /etc/do-snap-bot/env IS sensitive — treat the
+# droplet accordingly (private network, SSH key only, no password auth).
+
+users:
+  - name: dosnap
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:/usr/bin/systemctl restart do-snap-bot, /usr/bin/systemctl stop do-snap-bot, /usr/bin/systemctl status do-snap-bot"
+    ssh_authorized_keys:
+      - <YOUR_SSH_PUBLIC_KEY>
+
+packages:
+  - curl
+  - jq
+  - ca-certificates
+  - nginx
+  - unzip
+  - gnupg
+
+package_update: true
+package_upgrade: true
+
+write_files:
+  # systemd service unit
+  - path: /etc/systemd/system/do-snap-bot.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=DO Snap Bot — Slack DigitalOcean snapshot/restore controller
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=dosnap
+      Group=dosnap
+      WorkingDirectory=/opt/do-snap-bot
+      ExecStart=/opt/do-snap-bot/start.sh
+      Restart=on-failure
+      RestartSec=15s
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=do-snap-bot
+      EnvironmentFile=-/etc/do-snap-bot/env
+      LimitNOFILE=65536
+      TimeoutStartSec=60
+      TimeoutStopSec=30
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # Environment file — only OP_SERVICE_ACCOUNT_TOKEN lives here.
+  # Replace <OP_SERVICE_ACCOUNT_TOKEN> with your actual 1Password service account token.
+  # SECURITY: chmod 600, owned by dosnap only.
+  - path: /etc/do-snap-bot/env
+    permissions: "0600"
+    owner: "dosnap:dosnap"
+    content: |
+      OP_SERVICE_ACCOUNT_TOKEN=<OP_SERVICE_ACCOUNT_TOKEN>
+
+  # nginx welcome page for health checks
+  - path: /var/www/html/index.html
+    permissions: "0644"
+    content: |
+      <!DOCTYPE html>
+      <html lang="en">
+      <head><meta charset="utf-8"><title>DO Snap Bot Controller</title>
+      <style>body{font-family:monospace;max-width:540px;margin:60px auto;color:#eee;background:#1a1a2e}
+      h1{color:#00bcd4}p{color:#888}</style>
+      </head>
+      <body>
+      <h1>DO Snap Bot Controller</h1>
+      <p>Bot controller is running.</p>
+      </body></html>
+
+runcmd:
+  # ── 1Password CLI ──────────────────────────────────────────────────────────
+  - curl -sS https://downloads.1password.com/linux/keys/1password.asc
+      | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main"
+      > /etc/apt/sources.list.d/1password.list
+  - mkdir -p /etc/debsig/policies/AC2D62742012EA22
+  - curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol
+      > /etc/debsig/policies/AC2D62742012EA22/1password.pol
+  - mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
+  - curl -sS https://downloads.1password.com/linux/keys/1password.asc
+      | gpg --dearmor
+      > /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+  - apt-get update -qq && apt-get install -y --no-install-recommends 1password-cli
+
+  # ── doctl ──────────────────────────────────────────────────────────────────
+  - |
+    DOCTL_VERSION=1.110.0
+    curl -fsSL "https://github.com/digitalocean/doctl/releases/download/v${DOCTL_VERSION}/doctl-${DOCTL_VERSION}-linux-amd64.tar.gz" \
+      | tar -xz -C /usr/local/bin/
+
+  # ── uv (Python package manager) ───────────────────────────────────────────
+  - curl -LsSf https://astral.sh/uv/install.sh | sh
+  - ln -sf /root/.local/bin/uv /usr/local/bin/uv
+
+  # ── deploy bot code ───────────────────────────────────────────────────────
+  - mkdir -p /opt/do-snap-bot
+  - chown -R dosnap:dosnap /opt/do-snap-bot
+
+  # ── nginx ─────────────────────────────────────────────────────────────────
+  - systemctl enable --now nginx
+
+  # ── systemd service ───────────────────────────────────────────────────────
+  - systemctl daemon-reload
+  - systemctl enable do-snap-bot
+
+  # NOTE: do-snap-bot will NOT auto-start yet because /opt/do-snap-bot is empty.
+  # After cloud-init completes:
+  #   1. SCP or git-clone the slack-bot/ directory to /opt/do-snap-bot/
+  #   2. cp /opt/do-snap-bot/.env.op.example /opt/do-snap-bot/.env.op
+  #   3. Edit .env.op with your op:// paths
+  #   4. systemctl start do-snap-bot
+  #   5. journalctl -u do-snap-bot -f   (watch logs)
