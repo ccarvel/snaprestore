@@ -2,15 +2,17 @@
 set -eo pipefail
 
 #-----------------------------------------
-# CONFIGURATION - Edit these or use flags/env vars
+# CONFIGURATION
 #-----------------------------------------
 DROPLET_ID=""       # Droplet ID, or leave blank for interactive selection
-SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{date}
+SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{YYYYMMDD-HHMM}
 OP_ITEM=""          # Optional: 1Password path, e.g. op://Private/DigitalOcean/token
 DOCTL_CONTEXT=""    # Optional: doctl auth context name, e.g. "snaprestore"
 #-----------------------------------------
 
-# --- Flag parsing ---
+# ── flag parsing ──────────────────────────────────────────────────────────────
+
+ORIGINAL_ARGS=("$@")
 DRY_RUN=false
 QUIET=false
 JSON_OUT=false
@@ -42,107 +44,50 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# --- Logging setup ---
+# ── logging ───────────────────────────────────────────────────────────────────
+
 if [[ -n "$LOG_FILE" ]]; then
   mkdir -p "$(dirname "$LOG_FILE")"
   exec > >(tee -a "$LOG_FILE") 2>&1
 fi
 
-# --- Output helpers ---
-info() { [[ "$QUIET" == true ]] && return 0; echo "  $*"; }
-ok()   { [[ "$QUIET" == true ]] && return 0; echo "  ✓ $*"; }
-warn() { echo "  ⚠ $*" >&2; }
-err()  { echo "  ✗ $*" >&2; }
+# ── bootstrap + UI layer ──────────────────────────────────────────────────────
 
-header() {
-  [[ "$QUIET" == true ]] && return 0
-  echo ""
-  echo "========================================"
-  echo "  $*"
-  echo "========================================"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/bootstrap_sh.sh
+source "${SCRIPT_DIR}/lib/bootstrap_sh.sh"
+bootstrap_ui "$0" "${ORIGINAL_ARGS[@]}"
+# shellcheck source=lib/ui_sh.sh
+source "${SCRIPT_DIR}/lib/ui_sh.sh"
 
-# --- Cleanup trap ---
+# ── cleanup trap ──────────────────────────────────────────────────────────────
+
 CURRENT_OP=""
 CREATED_RESOURCE=""
 
 cleanup() {
   local code=$?
+  ui_spinner_stop  # clears spinner line and restores cursor
   if [[ $code -ne 0 && -n "$CURRENT_OP" ]]; then
     echo "" >&2
-    warn "Interrupted during: $CURRENT_OP"
-    [[ -n "$CREATED_RESOURCE" ]] && warn "Resource may be in unknown state: $CREATED_RESOURCE"
-    warn "Check console: https://cloud.digitalocean.com/droplets"
+    ui_warn "Interrupted during: $CURRENT_OP"
+    [[ -n "$CREATED_RESOURCE" ]] && ui_warn "Resource may be in unknown state: $CREATED_RESOURCE"
+    ui_warn "Check console: https://cloud.digitalocean.com/droplets"
   fi
 }
 trap cleanup EXIT
 
-# --- fzf check ---
-HAS_FZF=$(command -v fzf &>/dev/null && echo "yes" || echo "no")
+# ── doctl setup ───────────────────────────────────────────────────────────────
 
-# Generic selection: fzf if available, numbered menu otherwise
-select_option() {
-  local prompt="$1"
-  shift
-  local options=("$@")
-
-  if [[ "$HAS_FZF" == "yes" ]]; then
-    printf '%s\n' "${options[@]}" | fzf \
-      --height=15 \
-      --prompt="$prompt " \
-      --header="↑↓ navigate  Enter select  Ctrl-C abort"
-  else
-    echo "" >&2
-    echo "$prompt" >&2
-    echo "-------------------" >&2
-    local i=1
-    for opt in "${options[@]}"; do
-      echo "  $i) $opt" >&2
-      ((i++))
-    done
-    echo "" >&2
-    local selection
-    read -rp "Enter number: " selection
-    [[ -z "$selection" ]] && { err "No selection made."; exit 1; }
-    echo "${options[$((selection - 1))]}"
-  fi
-}
-
-# --- Token loading: op → env var → prompt ---
-load_token() {
-  local token=""
-
-  if [[ -n "$OP_ITEM" ]]; then
-    if command -v op &>/dev/null; then
-      token=$(op read "$OP_ITEM" 2>/dev/null) || warn "op read failed for '$OP_ITEM' — falling back"
-    else
-      warn "'op' CLI not found — falling back to env var"
-    fi
-  fi
-
-  [[ -z "$token" && -n "$DIGITALOCEAN_ACCESS_TOKEN" ]] && token="$DIGITALOCEAN_ACCESS_TOKEN"
-  [[ -z "$token" && -n "$DO_API_TOKEN" ]]              && token="$DO_API_TOKEN"
-
-  if [[ -z "$token" && -z "$DOCTL_CONTEXT" ]]; then
-    read -rsp "DigitalOcean API Token: " token
-    echo
-    [[ -z "$token" ]] && { err "Token required."; exit 1; }
-  fi
-
-  [[ -n "$token" ]] && export DIGITALOCEAN_ACCESS_TOKEN="$token"
-}
-
-# --- doctl checks ---
 check_doctl() {
   if ! command -v doctl &>/dev/null; then
-    err "doctl is required but not installed."
-    err "  Install:  brew install doctl"
-    err "  Auth:     doctl auth init --context snaprestore"
+    ui_err "doctl is required but not installed."
+    ui_err "  Install:  brew install doctl"
+    ui_err "  Auth:     doctl auth init --context snaprestore"
     exit 1
   fi
 }
 
-# Wraps doctl with optional --context
 doctl_cmd() {
   if [[ -n "$DOCTL_CONTEXT" ]]; then
     doctl --context "$DOCTL_CONTEXT" "$@"
@@ -151,39 +96,63 @@ doctl_cmd() {
   fi
 }
 
+# ── token loading ─────────────────────────────────────────────────────────────
+
+load_token() {
+  local token=""
+  if [[ -n "$OP_ITEM" ]]; then
+    if command -v op &>/dev/null; then
+      token=$(op read "$OP_ITEM" 2>/dev/null) || ui_warn "op read failed for '$OP_ITEM' — falling back"
+    else
+      ui_warn "'op' CLI not found — falling back to env var"
+    fi
+  fi
+  [[ -z "$token" && -n "$DIGITALOCEAN_ACCESS_TOKEN" ]] && token="$DIGITALOCEAN_ACCESS_TOKEN"
+  [[ -z "$token" && -n "$DO_API_TOKEN" ]]              && token="$DO_API_TOKEN"
+  if [[ -z "$token" && -z "$DOCTL_CONTEXT" ]]; then
+    token=$(ui_input_secret "DigitalOcean API Token")
+    [[ -z "$token" ]] && { ui_err "Token required."; exit 1; }
+  fi
+  [[ -n "$token" ]] && export DIGITALOCEAN_ACCESS_TOKEN="$token"
+}
+
 check_doctl
 load_token
 
-# --- list|get dispatch ---
+# ── banner ────────────────────────────────────────────────────────────────────
+
+ui_banner "DO Snapshot Tool"
+
+# ── list|get dispatch ─────────────────────────────────────────────────────────
+
 DROPLET_ID_LOWER=$(echo "$DROPLET_ID" | tr '[:upper:]' '[:lower:]')
 case "$DROPLET_ID_LOWER" in
   list|get)
     doctl_cmd compute droplet list \
       --format "ID,Name,Status,Size,Region,Disk,Memory,VCPUs"
-    exit 0
-    ;;
+    exit 0 ;;
 esac
 
-# --- Fetch droplets ---
-info "Fetching droplets..."
+# ── fetch + select droplet ────────────────────────────────────────────────────
+
+ui_info "Fetching droplets…"
 DROPLETS_JSON=$(doctl_cmd compute droplet list --output json)
 
-# --- Select droplet ---
 if [[ -z "$DROPLET_ID" ]]; then
   mapfile -t DROPLET_OPTIONS < <(
     echo "$DROPLETS_JSON" | jq -r \
       '.[] | "\(.id)|\(.name)|\(.status)|\(.size_slug)|\(.region.slug)|\(.disk)GB"'
   )
-  [[ ${#DROPLET_OPTIONS[@]} -eq 0 ]] && { err "No droplets found."; exit 1; }
-
-  SELECTED=$(select_option "Select droplet to snapshot:" "${DROPLET_OPTIONS[@]}")
-  [[ -z "$SELECTED" ]] && { err "No selection made."; exit 1; }
+  [[ ${#DROPLET_OPTIONS[@]} -eq 0 ]] && { ui_err "No droplets found."; exit 1; }
+  SELECTED=$(ui_choose "Select droplet to snapshot:" "${DROPLET_OPTIONS[@]}")
+  [[ -z "$SELECTED" ]] && { ui_err "No selection made."; exit 1; }
   DROPLET_ID=$(echo "$SELECTED" | cut -d'|' -f1)
 fi
 
-# --- Get droplet details (single jq pass) ---
+# ── droplet details (single jq pass) ─────────────────────────────────────────
+
 DROPLET_JSON=$(echo "$DROPLETS_JSON" | jq -r --argjson id "$DROPLET_ID" '.[] | select(.id == $id)')
-[[ -z "$DROPLET_JSON" ]] && { err "Droplet $DROPLET_ID not found."; exit 1; }
+[[ -z "$DROPLET_JSON" ]] && { ui_err "Droplet $DROPLET_ID not found."; exit 1; }
 
 read -r DROPLET_NAME DROPLET_STATUS DROPLET_SIZE DROPLET_REGION \
        DROPLET_DISK DROPLET_VCPUS DROPLET_MEMORY DROPLET_IP <<EOF
@@ -194,94 +163,123 @@ $(echo "$DROPLET_JSON" | jq -r '[
 ] | @tsv')
 EOF
 
-# --- Reserved IP check ---
-info "Checking for reserved IP..."
+ui_info "Checking for reserved IP…"
 RESERVED_IPS_JSON=$(doctl_cmd compute reserved-ip list --output json)
 DROPLET_RESERVED_IP=$(echo "$RESERVED_IPS_JSON" | jq -r \
-  --argjson id "$DROPLET_ID" \
-  '.[] | select(.droplet.id == $id) | .ip')
+  --argjson id "$DROPLET_ID" '.[] | select(.droplet.id == $id) | .ip')
 
-# --- Display droplet ---
-header "Droplet Details"
-info "ID:          $DROPLET_ID"
-info "Name:        $DROPLET_NAME"
-info "Status:      $DROPLET_STATUS"
-info "Region:      $DROPLET_REGION"
-info "Size:        $DROPLET_SIZE"
-info "vCPUs:       $DROPLET_VCPUS"
-info "Memory:      ${DROPLET_MEMORY}MB"
-info "Disk:        ${DROPLET_DISK}GB"
-info "Public IP:   $DROPLET_IP"
-if [[ -n "$DROPLET_RESERVED_IP" ]]; then
-  info "Reserved IP: $DROPLET_RESERVED_IP"
-else
-  info "Reserved IP: (none)"
-fi
-echo ""
+ui_panel "Droplet Details" \
+  "ID"          "$DROPLET_ID" \
+  "Name"        "$DROPLET_NAME" \
+  "Status"      "$DROPLET_STATUS" \
+  "Region"      "$DROPLET_REGION" \
+  "Size"        "$DROPLET_SIZE" \
+  "vCPUs"       "$DROPLET_VCPUS" \
+  "Memory"      "${DROPLET_MEMORY} MB" \
+  "Disk"        "${DROPLET_DISK} GB" \
+  "Public IP"   "$DROPLET_IP" \
+  "Reserved IP" "${DROPLET_RESERVED_IP:-(none)}"
 
-# --- Snapshot name ---
+# ── snapshot name ─────────────────────────────────────────────────────────────
+
 if [[ -z "$SNAPSHOT_NAME" ]]; then
   DEFAULT_SNAPSHOT_NAME="${DROPLET_NAME}-snapshot-$(date +%Y%m%d-%H%M)"
-  read -rp "  Snapshot name [$DEFAULT_SNAPSHOT_NAME]: " SNAPSHOT_NAME
-  SNAPSHOT_NAME="${SNAPSHOT_NAME:-$DEFAULT_SNAPSHOT_NAME}"
+  SNAPSHOT_NAME=$(ui_input "Snapshot name" "$DEFAULT_SNAPSHOT_NAME")
 fi
 
-info "Snapshot will be named: $SNAPSHOT_NAME"
+ui_info "Snapshot will be named: $SNAPSHOT_NAME"
 echo ""
 
-# --- Confirm ---
-read -rp "Proceed with snapshot? (y/n): " CONFIRM
-[[ "$CONFIRM" != "y" ]] && { info "Aborted."; exit 0; }
+ui_confirm "Proceed with snapshot?" || { ui_info "Aborted."; exit 0; }
 
-# --- Shutdown ---
+# ── shutdown ──────────────────────────────────────────────────────────────────
+
 if [[ "$DROPLET_STATUS" == "active" ]]; then
   echo ""
-  info "Shutting down droplet for clean snapshot..."
   CURRENT_OP="shutdown droplet $DROPLET_ID ($DROPLET_NAME)"
 
   if [[ "$DRY_RUN" == true ]]; then
-    info "[DRY-RUN] doctl compute droplet-action shutdown $DROPLET_ID --wait"
+    ui_info "[DRY-RUN] doctl compute droplet-action shutdown $DROPLET_ID --wait"
   else
-    if ! doctl_cmd compute droplet-action shutdown "$DROPLET_ID" \
-         --wait --output json > /dev/null 2>&1; then
-      warn "Graceful shutdown failed — attempting power-off..."
+    local_tmpfile=$(mktemp)
+    SHUTDOWN_START=$(date +%s)
+    ui_spinner_start "Shutting down droplet"
+
+    doctl_cmd compute droplet-action shutdown "$DROPLET_ID" \
+      --wait --output json > "$local_tmpfile" 2>&1 &
+    DOCTL_PID=$!
+
+    if ! wait "$DOCTL_PID"; then
+      ui_spinner_stop
+      ui_warn "Graceful shutdown failed — attempting power-off…"
       CURRENT_OP="power-off droplet $DROPLET_ID ($DROPLET_NAME)"
+      rm -f "$local_tmpfile"
+      local_tmpfile=$(mktemp)
+
+      ui_spinner_start "Powering off droplet"
       doctl_cmd compute droplet-action power-off "$DROPLET_ID" \
-        --wait --output json > /dev/null || {
-        err "Power-off failed. Check droplet state in console before proceeding."
+        --wait --output json > "$local_tmpfile" 2>&1 &
+      DOCTL_PID=$!
+
+      if ! wait "$DOCTL_PID"; then
+        ui_spinner_stop
+        ui_err "Power-off failed. Check droplet in console."
+        head -5 "$local_tmpfile" >&2
+        rm -f "$local_tmpfile"
         exit 1
-      }
+      fi
+      ui_spinner_stop "Powered off."
+    else
+      ui_spinner_stop "Droplet stopped."
     fi
-    ok "Droplet stopped."
+
+    record_duration "shutdown" "$(( $(date +%s) - SHUTDOWN_START ))"
+    rm -f "$local_tmpfile"
   fi
   CURRENT_OP=""
 else
-  info "Droplet is already off."
+  ui_info "Droplet is already off."
 fi
 
-# --- Create snapshot ---
+# ── create snapshot ───────────────────────────────────────────────────────────
+
 echo ""
-info "Creating snapshot '$SNAPSHOT_NAME' (this may take several minutes)..."
 CURRENT_OP="snapshot droplet $DROPLET_ID ($DROPLET_NAME)"
 CREATED_RESOURCE="snapshot of $DROPLET_NAME"
 
 if [[ "$DRY_RUN" == true ]]; then
-  info "[DRY-RUN] doctl compute droplet-action snapshot $DROPLET_ID --snapshot-name \"$SNAPSHOT_NAME\" --wait"
+  ui_info "[DRY-RUN] doctl compute droplet-action snapshot $DROPLET_ID --snapshot-name \"$SNAPSHOT_NAME\" --wait"
   NEW_SNAPSHOT_ID="(dry-run)"
   NEW_SNAPSHOT_SIZE="0"
   NEW_SNAPSHOT_MIN_DISK="$DROPLET_DISK"
   NEW_SNAPSHOT_REGIONS="$DROPLET_REGION"
   COST_EST="0.00"
 else
+  local_tmpfile=$(mktemp)
+  SNAP_START=$(date +%s)
+  SNAP_ETA=$(get_eta "snapshot" "$DROPLET_DISK")
+
+  ui_spinner_start "Creating snapshot '$SNAPSHOT_NAME'" "$SNAP_ETA"
+
   doctl_cmd compute droplet-action snapshot "$DROPLET_ID" \
     --snapshot-name "$SNAPSHOT_NAME" \
-    --wait \
-    --output json > /dev/null
-  ok "Snapshot complete."
+    --wait --output json > "$local_tmpfile" 2>&1 &
+  DOCTL_PID=$!
 
-  # Fetch snapshot details — most recently created match avoids name-collision bugs
-  echo ""
-  info "Fetching snapshot details..."
+  if ! wait "$DOCTL_PID"; then
+    ui_spinner_stop
+    ui_err "Snapshot failed:"
+    head -5 "$local_tmpfile" >&2
+    rm -f "$local_tmpfile"
+    exit 1
+  fi
+
+  SNAP_DURATION=$(( $(date +%s) - SNAP_START ))
+  ui_spinner_stop "Snapshot complete."
+  record_duration "snapshot" "$SNAP_DURATION" "$DROPLET_DISK"
+  rm -f "$local_tmpfile"
+
+  ui_info "Fetching snapshot details…"
   SNAP_JSON=$(doctl_cmd compute snapshot list --resource droplet --output json | \
     jq --arg name "$SNAPSHOT_NAME" \
     '[.[] | select(.name == $name)] | sort_by(.created_at) | last')
@@ -296,108 +294,118 @@ fi
 CURRENT_OP=""
 CREATED_RESOURCE=""
 
-header "Snapshot Created"
-info "ID:         $NEW_SNAPSHOT_ID"
-info "Name:       $SNAPSHOT_NAME"
-info "Compressed: ${NEW_SNAPSHOT_SIZE}GB  (source disk: ${NEW_SNAPSHOT_MIN_DISK}GB)"
-info "Regions:    $NEW_SNAPSHOT_REGIONS"
-[[ "$DRY_RUN" == false ]] && info "Est. cost:  ~\$${COST_EST}/mo"
-echo ""
-[[ "$DRY_RUN" == false ]] && info "Restore:    ./do-restore.sh  # select: $SNAPSHOT_NAME"
-echo ""
+ui_panel "Snapshot Created" \
+  "ID"          "$NEW_SNAPSHOT_ID" \
+  "Name"        "$SNAPSHOT_NAME" \
+  "Compressed"  "${NEW_SNAPSHOT_SIZE} GB  (source disk: ${NEW_SNAPSHOT_MIN_DISK} GB)" \
+  "Regions"     "$NEW_SNAPSHOT_REGIONS" \
+  "Est. cost"   "~\$${COST_EST}/mo" \
+  "Restore"     "./do-restore.sh"
 
-# --- Post-snapshot action ---
+# ── post-snapshot action ──────────────────────────────────────────────────────
+
 POST_OPTIONS=(
   "start|Start it back up"
   "leave|Leave it shut down (billing continues)"
   "delete|Delete/destroy it"
 )
-SELECTED=$(select_option "What to do with the droplet?" "${POST_OPTIONS[@]}")
+SELECTED=$(ui_choose "What to do with the droplet?" "${POST_OPTIONS[@]}")
 POST_ACTION=$(echo "$SELECTED" | cut -d'|' -f1)
 
 case "$POST_ACTION" in
   start)
     echo ""
-    info "Starting droplet..."
     CURRENT_OP="power-on droplet $DROPLET_ID ($DROPLET_NAME)"
 
     if [[ "$DRY_RUN" == true ]]; then
-      info "[DRY-RUN] doctl compute droplet-action power-on $DROPLET_ID --wait"
+      ui_info "[DRY-RUN] doctl compute droplet-action power-on $DROPLET_ID --wait"
     else
+      local_tmpfile=$(mktemp)
+      ui_spinner_start "Starting droplet"
+
       doctl_cmd compute droplet-action power-on "$DROPLET_ID" \
-        --wait --output json > /dev/null
+        --wait --output json > "$local_tmpfile" 2>&1 &
+      DOCTL_PID=$!
+
+      if ! wait "$DOCTL_PID"; then
+        ui_spinner_stop
+        ui_err "Power-on failed."
+        rm -f "$local_tmpfile"
+        exit 1
+      fi
+      ui_spinner_stop "Droplet is active."
+      rm -f "$local_tmpfile"
+
       LIVE_IP=$(doctl_cmd compute droplet get "$DROPLET_ID" --output json | \
         jq -r 'first(.[].networks.v4[] | select(.type == "public") | .ip_address)')
       CONNECT_IP="${DROPLET_RESERVED_IP:-$LIVE_IP}"
-      ok "Droplet is active."
-      info "Connect: ssh root@$CONNECT_IP"
+      ui_info "Connect: ssh root@$CONNECT_IP"
     fi
     CURRENT_OP=""
     ;;
 
   leave)
     echo ""
-    info "Droplet left shut down."
-    warn "Billing continues while the droplet exists."
+    ui_info "Droplet left shut down."
+    ui_warn "Billing continues while the droplet exists."
     ;;
 
   delete)
     echo ""
     if [[ -n "$DROPLET_RESERVED_IP" ]]; then
-      warn "Reserved IP $DROPLET_RESERVED_IP will be unassigned but NOT deleted."
-      warn "Reserved IPs continue to accrue charges (~\$5/mo) until deleted."
+      ui_warn "Reserved IP $DROPLET_RESERVED_IP will be unassigned but NOT deleted."
+      ui_warn "Reserved IPs accrue charges (~\$5/mo) until explicitly deleted."
     fi
     echo ""
-    read -rp "  Type the droplet name '$DROPLET_NAME' to confirm deletion: " DELETE_CONFIRM
+    DEL_CONFIRM=$(ui_input "Type the droplet name '$DROPLET_NAME' to confirm deletion" "")
 
-    if [[ "$DELETE_CONFIRM" == "$DROPLET_NAME" ]]; then
+    if [[ "$DEL_CONFIRM" == "$DROPLET_NAME" ]]; then
       CURRENT_OP="delete droplet $DROPLET_ID ($DROPLET_NAME)"
 
       if [[ "$DRY_RUN" == true ]]; then
-        info "[DRY-RUN] doctl compute droplet delete $DROPLET_ID --force"
+        ui_info "[DRY-RUN] doctl compute droplet delete $DROPLET_ID --force"
       else
         doctl_cmd compute droplet delete "$DROPLET_ID" --force
-        ok "Droplet '$DROPLET_NAME' deleted."
-        echo ""
-        info "Snapshot preserved:  $SNAPSHOT_NAME"
-        info "Snapshot ID:         $NEW_SNAPSHOT_ID"
-        info "Compressed size:     ${NEW_SNAPSHOT_SIZE}GB"
-        info "Source disk:         ${NEW_SNAPSHOT_MIN_DISK}GB"
-        info "Storage cost:        ~\$${COST_EST}/mo"
-        echo ""
-        info "Restore command:     ./do-restore.sh"
+        ui_panel "Droplet Deleted" \
+          "Snapshot"     "$SNAPSHOT_NAME" \
+          "Snapshot ID"  "$NEW_SNAPSHOT_ID" \
+          "Compressed"   "${NEW_SNAPSHOT_SIZE} GB" \
+          "Source disk"  "${NEW_SNAPSHOT_MIN_DISK} GB" \
+          "Storage cost" "~\$${COST_EST}/mo" \
+          "Restore"      "./do-restore.sh"
       fi
       CURRENT_OP=""
     else
-      info "Deletion cancelled. Droplet left shut down."
+      ui_info "Deletion cancelled. Droplet left shut down."
     fi
     ;;
 esac
 
-# --- JSON output ---
+# ── JSON output ───────────────────────────────────────────────────────────────
+
 if [[ "$JSON_OUT" == true ]]; then
   jq -n \
-    --arg  droplet_id      "$DROPLET_ID" \
-    --arg  droplet_name    "$DROPLET_NAME" \
-    --arg  snapshot_id     "$NEW_SNAPSHOT_ID" \
-    --arg  snapshot_name   "$SNAPSHOT_NAME" \
-    --arg  snapshot_size   "$NEW_SNAPSHOT_SIZE" \
-    --arg  min_disk        "$NEW_SNAPSHOT_MIN_DISK" \
-    --arg  regions         "$NEW_SNAPSHOT_REGIONS" \
-    --arg  post_action     "$POST_ACTION" \
-    --arg  reserved_ip     "$DROPLET_RESERVED_IP" \
+    --arg  droplet_id    "$DROPLET_ID" \
+    --arg  droplet_name  "$DROPLET_NAME" \
+    --arg  snapshot_id   "$NEW_SNAPSHOT_ID" \
+    --arg  snapshot_name "$SNAPSHOT_NAME" \
+    --arg  snapshot_size "$NEW_SNAPSHOT_SIZE" \
+    --arg  min_disk      "$NEW_SNAPSHOT_MIN_DISK" \
+    --arg  regions       "$NEW_SNAPSHOT_REGIONS" \
+    --arg  post_action   "$POST_ACTION" \
+    --arg  reserved_ip   "$DROPLET_RESERVED_IP" \
     '{
-      droplet_id:    $droplet_id,
-      droplet_name:  $droplet_name,
-      snapshot_id:   $snapshot_id,
-      snapshot_name: $snapshot_name,
+      droplet_id:       $droplet_id,
+      droplet_name:     $droplet_name,
+      snapshot_id:      $snapshot_id,
+      snapshot_name:    $snapshot_name,
       snapshot_size_gb: ($snapshot_size | tonumber? // $snapshot_size),
-      min_disk_gb:   ($min_disk | tonumber? // $min_disk),
-      regions:       ($regions | split(", ")),
-      post_action:   $post_action,
-      reserved_ip:   $reserved_ip
+      min_disk_gb:      ($min_disk      | tonumber? // $min_disk),
+      regions:          ($regions | split(", ")),
+      post_action:      $post_action,
+      reserved_ip:      $reserved_ip
     }'
 fi
 
 echo ""
-ok "Done."
+ui_ok "Done."
