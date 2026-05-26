@@ -163,6 +163,13 @@ doctl auth init --context snaprestore
 
 When prompted, paste your DigitalOcean API token. The token is stored in `~/.config/doctl/config.yaml` (mode 0600) — it is never written to a script file or to shell history.
 
+To replace the token later (e.g. if you rotated it):
+
+```bash
+doctl auth remove --context snaprestore
+doctl auth init --context snaprestore
+```
+
 Verify the context works:
 
 ```bash
@@ -172,13 +179,7 @@ doctl compute droplet list
 
 ### 2.2 Set the context in the scripts
 
-In both `do-snapshot.sh` and `do-restore.sh`, locate the configuration block near the top of each file and set:
-
-```bash
-DOCTL_CONTEXT="snaprestore"
-```
-
-This tells every `doctl` call in the script which stored token to use. When `DOCTL_CONTEXT` is set, the scripts do not need `DIGITALOCEAN_ACCESS_TOKEN` in the environment.
+Both `do-snapshot.sh` and `do-restore.sh` already have `DOCTL_CONTEXT="snaprestore"` set in their configuration block. No script edits are needed — authenticating the context in step 2.1 is sufficient.
 
 ---
 
@@ -209,7 +210,7 @@ op item create \
   "credential=dop_v1_YOUR_TOKEN_HERE"
 ```
 
-The default path used in `.env.example` is:
+The 1Password path for this item (shown in `.env.example` for reference) is:
 
 ```
 op://Private/DigitalOcean API Token/credential

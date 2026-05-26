@@ -24,7 +24,7 @@ A Slack Bolt app that runs DigitalOcean snapshot and restore operations via slas
 
 | Command | Description |
 |---------|-------------|
-| `/do-snapshot [name-or-id]` | Snapshot a droplet (shuts it down first). Prompts if multiple droplets exist. |
+| `/do-snapshot [name-or-id]` | Snapshot a droplet (prompts to shut down first for consistency). Prompts if multiple droplets exist. |
 | `/do-restore [snap-id-or-name]` | Create a droplet from a snapshot. Lists recent snapshots if no argument given. |
 | `/do-deploy-cancel <job-id>` | Cancel a running snapshot or restore job by job ID. |
 
@@ -51,7 +51,7 @@ slack-bot/
 
 The Slack Bolt async application. Key responsibilities:
 
-- **`/do-snapshot`** handler (`cmd_snapshot` → `_snapshot_job`): Finds the target droplet, shuts it down gracefully (falls back to power-off), creates a named snapshot via `doctl`, and reports the result in a Slack thread.
+- **`/do-snapshot`** handler (`cmd_snapshot` → `_snapshot_job`): Finds the target droplet, prompts to shut it down gracefully (falls back to power-off if shutdown fails), creates a named snapshot via `doctl`, and reports the result in a Slack thread.
 - **`/do-restore`** handler (`cmd_restore` → `_restore_job`): Lists recent snapshots if no argument is given; otherwise creates a new droplet from the specified snapshot and runs an HTTP health check after the droplet becomes active.
 - **`/do-deploy-cancel`** handler (`cmd_cancel`): Creates a cancel-flag file in `~/.local/share/do-snap-bot/jobs/<job-id>.cancel`. The running job polls for this file and terminates cleanly.
 - **`run_doctl` / `run_doctl_long`**: Async wrappers around `doctl` subprocesses. `run_doctl_long` posts elapsed-time heartbeats to Slack every 2 minutes while the command runs, and checks for cancellation between heartbeats.

@@ -88,70 +88,42 @@ The scripts will call `op read "$OP_ITEM"` at startup. If `op` is not installed 
 
 Create a custom-scoped token at [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens).
 
-**`do-snapshot.sh` requires:**
+**Scripts token (`snaprestore-scripts`) — used by both scripts via the doctl context:**
 
-| Resource | Permissions |
-|----------|-------------|
-| Droplet | read, delete |
-| Droplet Action | create (shutdown, power-off, power-on, snapshot) |
-| Snapshot | read |
-| Reserved IP | read |
+| Scope | Required by |
+|-------|-------------|
+| `droplet:read` | Both scripts |
+| `droplet:create` | `do-restore.sh` — create droplet from snapshot |
+| `droplet:update` | `do-snapshot.sh` — shutdown / power-off / power-on / snapshot action |
+| `droplet:delete` | `do-snapshot.sh` — delete droplet after snapshot (optional) |
+| `snapshot:read` | Both scripts |
+| `snapshot:delete` | `do-snapshot.sh` — prune old snapshots |
+| `ssh_key:read` | `do-restore.sh` — attach SSH key at creation |
+| `reserved_ip:read` | Both scripts |
+| `reserved_ip:update` | `do-restore.sh` — assign reserved IP to restored droplet |
+| `action:read` | `do-restore.sh` — poll reserved IP assignment status |
 
-**`do-restore.sh` requires:**
+> **Missing `droplet:create` is the most common setup mistake.** Without it the restore wizard completes normally but no droplet is created and no error is shown.
 
-| Resource | Permissions |
-|----------|-------------|
-| Droplet | read, create |
-| Droplet Action | create |
-| Snapshot | read |
-| SSH Key | read |
-| Reserved IP | read, update |
+**Slack bot token (`snaprestore-bot`):** same scope set as the scripts token above.
 
 ### 4. Environment file
 
-Copy `.env.example` to `.env` (already listed in `.gitignore`) and update the `op://` references to match your vault paths. All variables are documented in `.env.example` with comments.
+`.env.example` is a **reference document only** — it lists every environment variable the project uses and shows the `op://` path format for what should be stored in 1Password. Do not copy or run it.
 
-```bash
-cp .env.example .env
-# Edit .env if your vault item paths differ from the defaults
-```
-
-For `op run` injection, `.env` must contain `op://` references — not raw tokens.
+The scripts authenticate via the `snaprestore` doctl context and need no environment variables. The Slack bot uses `slack-bot/.env.op` (see the Slack bot section).
 
 ---
 
 ## Token Loading Order
 
-Both scripts resolve the token in this order (first non-empty value wins):
-
-1. `OP_ITEM` config var → calls `op read` if `op` CLI is present
-2. `DIGITALOCEAN_ACCESS_TOKEN` environment variable
-3. `DO_API_TOKEN` environment variable (legacy fallback)
-4. `DOCTL_CONTEXT` config var → doctl uses its stored context token (no env var needed)
-5. Interactive prompt — input is hidden (`read -rsp`)
-
-**Never hardcode a token in the script.** Use one of the methods above.
-
-To inject via environment without hardcoding:
-
-```bash
-export DIGITALOCEAN_ACCESS_TOKEN="$(op read 'op://Private/DigitalOcean API Token/credential')"
-./do-snapshot.sh
-```
-
-Or use `op run` with the provided example file:
-
-```bash
-cp .env.example .env          # copy the template (gitignored)
-op run --env-file=.env -- ./do-snapshot.sh
-op run --env-file=.env -- ./do-restore.sh
-```
+The scripts authenticate via the `snaprestore` doctl context — no environment variables needed. If you ever need to override (e.g. for scripted use), set `OP_ITEM` in the script config block to an `op://` path and the script will call `op read` at startup.
 
 ---
 
 ## do-snapshot.sh
 
-Snapshots an existing droplet. Performs a clean shutdown first, waits for the action to complete, then lets you start, leave, or delete the droplet.
+Snapshots an existing droplet. Optionally shuts the droplet down first (prompts), waits for the snapshot to complete, then lets you start, leave, or delete the droplet.
 
 ### Flags
 
@@ -169,7 +141,7 @@ Snapshots an existing droplet. Performs a clean shutdown first, waits for the ac
 DROPLET_ID=""       # Set to a droplet ID, or leave blank for interactive selection
 SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{YYYYMMDD-HHMM}
 OP_ITEM=""          # Optional: op://Vault/Item/field
-DOCTL_CONTEXT=""    # Optional: doctl auth context, e.g. "snaprestore"
+DOCTL_CONTEXT="snaprestore"    # Optional: doctl auth context, e.g. "snaprestore"
 ```
 
 ### Usage
@@ -295,7 +267,7 @@ SIZE_SLUG=""        # Droplet size slug, or blank to prompt
 DROPLET_NAME=""     # Optional: defaults to restored-{snapshot-name}-{YYYYMMDD}
 RESERVED_IP=""      # Reserved IP to assign, or blank to prompt
 OP_ITEM=""          # Optional: op://Vault/Item/field
-DOCTL_CONTEXT=""    # Optional: doctl auth context, e.g. "snaprestore"
+DOCTL_CONTEXT="snaprestore"    # Optional: doctl auth context, e.g. "snaprestore"
 ```
 
 ### Usage
