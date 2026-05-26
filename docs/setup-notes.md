@@ -43,6 +43,40 @@ Log in as root first, make the change, then test the non-root login.
 
 ## 1Password service accounts
 
+### Draft email to IT for org-managed 1Password accounts
+
+If you need IT to configure the service account access, use this draft:
+
+---
+
+**Subject:** 1Password service account — vault access needed
+
+Hi [Name],
+
+I'm working on an internal tool that uses a 1Password service account to
+inject secrets into a server process at runtime (no secrets are stored on
+disk or in code). I need your help with two things in our Brown University
+1Password account:
+
+1. **Create a new vault** named `snaprestore` (or confirm I can use an
+   existing one like `CDS_Vault`).
+
+2. **Create a service account** named `do-snap-bot-controller` and grant it
+   **read-only** access to that vault. Generate the `ops_…` service account
+   token and share it with me securely (1Password or similar).
+
+The secrets I'll store in the vault are: Slack bot tokens, a Slack signing
+secret, and a DigitalOcean API token — all for an internal snapshot/restore
+automation tool running on a DigitalOcean droplet.
+
+Let me know if you need any additional context or if there's a self-service
+process I missed.
+
+Thanks,
+[Your name]
+
+---
+
 ### Service account must be created in an account you fully control
 
 The controller droplet authenticates to 1Password using a service account token (`OP_SERVICE_ACCOUNT_TOKEN`). Service accounts must be created and vault access must be granted by the account owner.
