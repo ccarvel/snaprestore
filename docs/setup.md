@@ -214,20 +214,20 @@ Store your DigitalOcean API token in a 1Password item:
 op item create \
   --category login \
   --title "DigitalOcean API Token" \
-  --vault Private \
+  --vault CDS_Vault \
   "credential=dop_v1_YOUR_TOKEN_HERE"
 ```
 
 The 1Password path for this item (shown in `.env.example` for reference) is:
 
 ```
-op://Private/DigitalOcean API Token/credential
+op://CDS_Vault/DigitalOcean API Token/credential
 ```
 
 Verify the path resolves:
 
 ```bash
-op read "op://Private/DigitalOcean API Token/credential"
+op read "op://CDS_Vault/DigitalOcean API Token/credential"
 ```
 
 ### 3.3 Create a vault item for the Slack bot
@@ -238,7 +238,7 @@ You will collect the Slack tokens in Part 7. Run the command below **after compl
 op item create \
   --category login \
   --title "do-snap-bot" \
-  --vault Private \
+  --vault CDS_Vault \
   "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
   "slack-app-token=xapp-YOUR_APP_TOKEN" \
   "signing-secret=YOUR_SIGNING_SECRET" \
@@ -250,11 +250,11 @@ The resulting 1Password paths, which match `slack-bot/.env.op.example`:
 
 | Secret | 1Password path |
 |--------|---------------|
-| Slack bot token (`xoxb-…`) | `op://Private/do-snap-bot/slack-bot-token` |
-| Slack app-level token (`xapp-…`) | `op://Private/do-snap-bot/slack-app-token` |
-| Slack signing secret | `op://Private/do-snap-bot/signing-secret` |
-| DigitalOcean API token | `op://Private/do-snap-bot/do-token` |
-| Allowed user IDs | `op://Private/do-snap-bot/allowed-users` |
+| Slack bot token (`xoxb-…`) | `op://CDS_Vault/do-snap-bot/slack-bot-token` |
+| Slack app-level token (`xapp-…`) | `op://CDS_Vault/do-snap-bot/slack-app-token` |
+| Slack signing secret | `op://CDS_Vault/do-snap-bot/signing-secret` |
+| DigitalOcean API token | `op://CDS_Vault/do-snap-bot/do-token` |
+| Allowed user IDs | `op://CDS_Vault/do-snap-bot/allowed-users` |
 
 > **WARNING:** Never write raw tokens to `.env.op`, commit files containing secrets, or store tokens in shell history.
 
@@ -264,7 +264,7 @@ The controller droplet runs `op run` non-interactively. A service account token 
 
 1. Go to [1password.com](https://1password.com) → **Developer** → **Service Accounts** → **New Service Account**.
 2. Name it something descriptive (e.g., `do-snap-bot-controller`).
-3. Grant **read** access to the `Private` vault (or a dedicated vault containing only the `do-snap-bot` item).
+3. Grant **read** access to the `CDS_Vault` vault (or a dedicated vault containing only the `do-snap-bot` item).
 4. Click **Generate Token** and copy the value (begins with `ops_`). **It is shown only once.**
 
 You will paste this token into `slack-bot/cloud-init/controller.yml` in Part 6.
@@ -450,7 +450,7 @@ Now that you have all the values, run the `op item create` command from Part 3.3
 op item create \
   --category login \
   --title "do-snap-bot" \
-  --vault Private \
+  --vault CDS_Vault \
   "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
   "slack-app-token=xapp-YOUR_APP_TOKEN" \
   "signing-secret=YOUR_SIGNING_SECRET" \

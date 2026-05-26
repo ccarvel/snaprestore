@@ -48,13 +48,13 @@ In Slack, click your name → **⋮** (More actions) → **Copy member ID**. Rep
 
 ## Part 2 — Store Secrets in 1Password
 
-You need all five values from Part 1 plus your Slack bot's DO API token (the `snaprestore-bot` token from `setup-cc.md` Part 1).
+You need all five values from Part 1 plus your Slack bot's DO API token (the `snaprestore-bot` token from `setup.md` Part 1).
 
 ```bash
 op item create \
   --category login \
   --title "do-snap-bot" \
-  --vault Private \
+  --vault CDS_Vault \
   "slack-bot-token=xoxb-YOUR_BOT_TOKEN" \
   "slack-app-token=xapp-YOUR_APP_TOKEN" \
   "signing-secret=YOUR_SIGNING_SECRET" \
@@ -65,8 +65,8 @@ op item create \
 Verify the paths resolve:
 
 ```bash
-op read "op://Private/do-snap-bot/slack-bot-token"
-op read "op://Private/do-snap-bot/do-token"
+op read "op://CDS_Vault/do-snap-bot/slack-bot-token"
+op read "op://CDS_Vault/do-snap-bot/do-token"
 ```
 
 ### 2.1 Create a 1Password service account
@@ -75,7 +75,7 @@ The controller droplet runs `op run` non-interactively and needs a service accou
 
 1. Go to [1password.com](https://1password.com) → **Developer** → **Service Accounts** → **New Service Account**.
 2. Name it `do-snap-bot-controller`.
-3. Grant **read** access to the `Private` vault.
+3. Grant **read** access to the `CDS_Vault` vault.
 4. Click **Generate Token** — copy the `ops_…` value. **Shown once only.**
 
 ---
@@ -140,11 +140,11 @@ cp .env.op.example .env.op
 Verify `.env.op` — the `op://` paths should match what you created in Part 2:
 
 ```
-SLACK_BOT_TOKEN=op://Private/do-snap-bot/slack-bot-token
-SLACK_APP_TOKEN=op://Private/do-snap-bot/slack-app-token
-SLACK_SIGNING_SECRET=op://Private/do-snap-bot/signing-secret
-DIGITALOCEAN_ACCESS_TOKEN=op://Private/do-snap-bot/do-token
-SLACK_ALLOWED_USERS=op://Private/do-snap-bot/allowed-users
+SLACK_BOT_TOKEN=op://CDS_Vault/do-snap-bot/slack-bot-token
+SLACK_APP_TOKEN=op://CDS_Vault/do-snap-bot/slack-app-token
+SLACK_SIGNING_SECRET=op://CDS_Vault/do-snap-bot/signing-secret
+DIGITALOCEAN_ACCESS_TOKEN=op://CDS_Vault/do-snap-bot/do-token
+SLACK_ALLOWED_USERS=op://CDS_Vault/do-snap-bot/allowed-users
 ```
 
 Start the service and watch the logs:
