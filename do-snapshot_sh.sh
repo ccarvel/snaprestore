@@ -1,25 +1,96 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 #-----------------------------------------
-# CONFIGURATION - Set these or use "list" to fetch
+# CONFIGURATION - Edit these or use flags/env vars
 #-----------------------------------------
-DO_TOKEN=""           # Required: your DigitalOcean API token
-DROPLET_ID=""         # Use "list" to see available droplets
-SNAPSHOT_NAME=""      # Optional: defaults to {droplet-name}-snapshot-{date}
+DROPLET_ID=""       # Droplet ID, or leave blank for interactive selection
+SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{date}
+OP_ITEM=""          # Optional: 1Password path, e.g. op://Private/DigitalOcean/token
+DOCTL_CONTEXT=""    # Optional: doctl auth context name, e.g. "snaprestore"
 #-----------------------------------------
 
-# Check if fzf is available
-HAS_FZF=$(command -v fzf >/dev/null 2>&1 && echo "yes" || echo "no")
+# --- Flag parsing ---
+DRY_RUN=false
+QUIET=false
+JSON_OUT=false
+LOG_FILE=""
 
-# Generic selection function: uses fzf if available, falls back to numbered menu
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --dry-run     Print operations without executing any API calls
+  --quiet       Suppress all non-error output
+  --json        Emit final state as JSON on stdout
+  --log FILE    Tee all output to FILE (appends)
+  --help        Show this help
+EOF
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    --quiet)   QUIET=true ;;
+    --json)    JSON_OUT=true ;;
+    --log)     LOG_FILE="$2"; shift ;;
+    --help)    usage ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+# --- Logging setup ---
+if [[ -n "$LOG_FILE" ]]; then
+  mkdir -p "$(dirname "$LOG_FILE")"
+  exec > >(tee -a "$LOG_FILE") 2>&1
+fi
+
+# --- Output helpers ---
+info() { [[ "$QUIET" == true ]] && return 0; echo "  $*"; }
+ok()   { [[ "$QUIET" == true ]] && return 0; echo "  ✓ $*"; }
+warn() { echo "  ⚠ $*" >&2; }
+err()  { echo "  ✗ $*" >&2; }
+
+header() {
+  [[ "$QUIET" == true ]] && return 0
+  echo ""
+  echo "========================================"
+  echo "  $*"
+  echo "========================================"
+}
+
+# --- Cleanup trap ---
+CURRENT_OP=""
+CREATED_RESOURCE=""
+
+cleanup() {
+  local code=$?
+  if [[ $code -ne 0 && -n "$CURRENT_OP" ]]; then
+    echo "" >&2
+    warn "Interrupted during: $CURRENT_OP"
+    [[ -n "$CREATED_RESOURCE" ]] && warn "Resource may be in unknown state: $CREATED_RESOURCE"
+    warn "Check console: https://cloud.digitalocean.com/droplets"
+  fi
+}
+trap cleanup EXIT
+
+# --- fzf check ---
+HAS_FZF=$(command -v fzf &>/dev/null && echo "yes" || echo "no")
+
+# Generic selection: fzf if available, numbered menu otherwise
 select_option() {
   local prompt="$1"
   shift
   local options=("$@")
-  
-  if [ "$HAS_FZF" = "yes" ]; then
-    printf '%s\n' "${options[@]}" | fzf --height=15 --prompt="$prompt "
+
+  if [[ "$HAS_FZF" == "yes" ]]; then
+    printf '%s\n' "${options[@]}" | fzf \
+      --height=15 \
+      --prompt="$prompt " \
+      --header="↑↓ navigate  Enter select  Ctrl-C abort"
   else
     echo "" >&2
     echo "$prompt" >&2
@@ -30,276 +101,303 @@ select_option() {
       ((i++))
     done
     echo "" >&2
-    read -p "Enter number: " selection
-    echo "${options[$((selection-1))]}"
+    local selection
+    read -rp "Enter number: " selection
+    [[ -z "$selection" ]] && { err "No selection made."; exit 1; }
+    echo "${options[$((selection - 1))]}"
   fi
 }
 
-# Load token from config, environment, or prompt
-DO_TOKEN="${DO_TOKEN:-$DO_API_TOKEN}"
-if [ -z "$DO_TOKEN" ]; then
-  read -p "DigitalOcean API Token: " DO_TOKEN
-fi
+# --- Token loading: op → env var → prompt ---
+load_token() {
+  local token=""
 
-# Helper function to list droplets
-list_droplets() {
-  echo "Fetching droplets..."
-  curl -s "https://api.digitalocean.com/v2/droplets" \
-    -H "Authorization: Bearer $DO_TOKEN" | jq -r '.droplets[] | "\(.id)  \(.name)  \(.status)  \(.size_slug)  \(.region.slug)  \(.disk)GB disk"'
+  if [[ -n "$OP_ITEM" ]]; then
+    if command -v op &>/dev/null; then
+      token=$(op read "$OP_ITEM" 2>/dev/null) || warn "op read failed for '$OP_ITEM' — falling back"
+    else
+      warn "'op' CLI not found — falling back to env var"
+    fi
+  fi
+
+  [[ -z "$token" && -n "$DIGITALOCEAN_ACCESS_TOKEN" ]] && token="$DIGITALOCEAN_ACCESS_TOKEN"
+  [[ -z "$token" && -n "$DO_API_TOKEN" ]]              && token="$DO_API_TOKEN"
+
+  if [[ -z "$token" && -z "$DOCTL_CONTEXT" ]]; then
+    read -rsp "DigitalOcean API Token: " token
+    echo
+    [[ -z "$token" ]] && { err "Token required."; exit 1; }
+  fi
+
+  [[ -n "$token" ]] && export DIGITALOCEAN_ACCESS_TOKEN="$token"
 }
 
-# Check for "list" command
-DROPLET_ID_LOWER=$(echo "$DROPLET_ID" | tr '[:upper:]' '[:lower:]')
-
-case "$DROPLET_ID_LOWER" in
-  list|get) list_droplets; exit 0 ;;
-esac
-
-# Fetch droplets
-echo "Fetching droplets..."
-DROPLETS=$(curl -s "https://api.digitalocean.com/v2/droplets" \
-  -H "Authorization: Bearer $DO_TOKEN")
-
-# If DROPLET_ID not set, prompt with selection
-if [ -z "$DROPLET_ID" ]; then
-  DROPLET_OPTIONS=($(echo "$DROPLETS" | jq -r '.droplets[] | "\(.id)|\(.name)|\(.status)|\(.size_slug)|\(.region.slug)|\(.disk)GB"'))
-  
-  if [ ${#DROPLET_OPTIONS[@]} -eq 0 ]; then
-    echo "No droplets found."
+# --- doctl checks ---
+check_doctl() {
+  if ! command -v doctl &>/dev/null; then
+    err "doctl is required but not installed."
+    err "  Install:  brew install doctl"
+    err "  Auth:     doctl auth init --context snaprestore"
     exit 1
   fi
-  
+}
+
+# Wraps doctl with optional --context
+doctl_cmd() {
+  if [[ -n "$DOCTL_CONTEXT" ]]; then
+    doctl --context "$DOCTL_CONTEXT" "$@"
+  else
+    doctl "$@"
+  fi
+}
+
+check_doctl
+load_token
+
+# --- list|get dispatch ---
+DROPLET_ID_LOWER=$(echo "$DROPLET_ID" | tr '[:upper:]' '[:lower:]')
+case "$DROPLET_ID_LOWER" in
+  list|get)
+    doctl_cmd compute droplet list \
+      --format "ID,Name,Status,Size,Region,Disk,Memory,VCPUs"
+    exit 0
+    ;;
+esac
+
+# --- Fetch droplets ---
+info "Fetching droplets..."
+DROPLETS_JSON=$(doctl_cmd compute droplet list --output json)
+
+# --- Select droplet ---
+if [[ -z "$DROPLET_ID" ]]; then
+  mapfile -t DROPLET_OPTIONS < <(
+    echo "$DROPLETS_JSON" | jq -r \
+      '.[] | "\(.id)|\(.name)|\(.status)|\(.size_slug)|\(.region.slug)|\(.disk)GB"'
+  )
+  [[ ${#DROPLET_OPTIONS[@]} -eq 0 ]] && { err "No droplets found."; exit 1; }
+
   SELECTED=$(select_option "Select droplet to snapshot:" "${DROPLET_OPTIONS[@]}")
+  [[ -z "$SELECTED" ]] && { err "No selection made."; exit 1; }
   DROPLET_ID=$(echo "$SELECTED" | cut -d'|' -f1)
 fi
 
-# Get droplet details
-DROPLET=$(echo "$DROPLETS" | jq -r ".droplets[] | select(.id == $DROPLET_ID)")
-DROPLET_NAME=$(echo "$DROPLET" | jq -r '.name')
-DROPLET_STATUS=$(echo "$DROPLET" | jq -r '.status')
-DROPLET_SIZE=$(echo "$DROPLET" | jq -r '.size_slug')
-DROPLET_REGION=$(echo "$DROPLET" | jq -r '.region.slug')
-DROPLET_DISK=$(echo "$DROPLET" | jq -r '.disk')
-DROPLET_VCPUS=$(echo "$DROPLET" | jq -r '.vcpus')
-DROPLET_MEMORY=$(echo "$DROPLET" | jq -r '.memory')
-DROPLET_IP=$(echo "$DROPLET" | jq -r '.networks.v4[] | select(.type == "public") | .ip_address' | head -1)
+# --- Get droplet details (single jq pass) ---
+DROPLET_JSON=$(echo "$DROPLETS_JSON" | jq -r --argjson id "$DROPLET_ID" '.[] | select(.id == $id)')
+[[ -z "$DROPLET_JSON" ]] && { err "Droplet $DROPLET_ID not found."; exit 1; }
 
-# Check for reserved IP
-echo ""
-echo "Checking for reserved IP..."
-RESERVED_IPS=$(curl -s "https://api.digitalocean.com/v2/reserved_ips" \
-  -H "Authorization: Bearer $DO_TOKEN")
-DROPLET_RESERVED_IP=$(echo "$RESERVED_IPS" | jq -r ".reserved_ips[] | select(.droplet.id == $DROPLET_ID) | .ip")
+read -r DROPLET_NAME DROPLET_STATUS DROPLET_SIZE DROPLET_REGION \
+       DROPLET_DISK DROPLET_VCPUS DROPLET_MEMORY DROPLET_IP <<EOF
+$(echo "$DROPLET_JSON" | jq -r '[
+  .name, .status, .size_slug, .region.slug,
+  (.disk | tostring), (.vcpus | tostring), (.memory | tostring),
+  (first(.networks.v4[] | select(.type == "public") | .ip_address) // "none")
+] | @tsv')
+EOF
 
-# Display droplet specs
-echo ""
-echo "========================================"
-echo "Droplet Details"
-echo "========================================"
-echo "  ID: $DROPLET_ID"
-echo "  Name: $DROPLET_NAME"
-echo "  Status: $DROPLET_STATUS"
-echo "  Region: $DROPLET_REGION"
-echo "  Size: $DROPLET_SIZE"
-echo "  vCPUs: $DROPLET_VCPUS"
-echo "  Memory: ${DROPLET_MEMORY}MB"
-echo "  Disk: ${DROPLET_DISK}GB"
-echo "  Public IP: $DROPLET_IP"
-if [ -n "$DROPLET_RESERVED_IP" ]; then
-  echo "  Reserved IP: $DROPLET_RESERVED_IP"
+# --- Reserved IP check ---
+info "Checking for reserved IP..."
+RESERVED_IPS_JSON=$(doctl_cmd compute reserved-ip list --output json)
+DROPLET_RESERVED_IP=$(echo "$RESERVED_IPS_JSON" | jq -r \
+  --argjson id "$DROPLET_ID" \
+  '.[] | select(.droplet.id == $id) | .ip')
+
+# --- Display droplet ---
+header "Droplet Details"
+info "ID:          $DROPLET_ID"
+info "Name:        $DROPLET_NAME"
+info "Status:      $DROPLET_STATUS"
+info "Region:      $DROPLET_REGION"
+info "Size:        $DROPLET_SIZE"
+info "vCPUs:       $DROPLET_VCPUS"
+info "Memory:      ${DROPLET_MEMORY}MB"
+info "Disk:        ${DROPLET_DISK}GB"
+info "Public IP:   $DROPLET_IP"
+if [[ -n "$DROPLET_RESERVED_IP" ]]; then
+  info "Reserved IP: $DROPLET_RESERVED_IP"
 else
-  echo "  Reserved IP: (none)"
+  info "Reserved IP: (none)"
 fi
-echo "========================================"
+echo ""
 
-# Prompt for snapshot name
-if [ -z "$SNAPSHOT_NAME" ]; then
+# --- Snapshot name ---
+if [[ -z "$SNAPSHOT_NAME" ]]; then
   DEFAULT_SNAPSHOT_NAME="${DROPLET_NAME}-snapshot-$(date +%Y%m%d-%H%M)"
-  echo ""
-  read -p "Snapshot name [$DEFAULT_SNAPSHOT_NAME]: " SNAPSHOT_NAME
-  SNAPSHOT_NAME=${SNAPSHOT_NAME:-$DEFAULT_SNAPSHOT_NAME}
+  read -rp "  Snapshot name [$DEFAULT_SNAPSHOT_NAME]: " SNAPSHOT_NAME
+  SNAPSHOT_NAME="${SNAPSHOT_NAME:-$DEFAULT_SNAPSHOT_NAME}"
 fi
 
+info "Snapshot will be named: $SNAPSHOT_NAME"
 echo ""
-echo "Snapshot will be named: $SNAPSHOT_NAME"
 
-# Confirm before proceeding
-echo ""
-read -p "Proceed with snapshot? (y/n): " CONFIRM
-if [ "$CONFIRM" != "y" ]; then
-  echo "Aborted."
-  exit 0
-fi
+# --- Confirm ---
+read -rp "Proceed with snapshot? (y/n): " CONFIRM
+[[ "$CONFIRM" != "y" ]] && { info "Aborted."; exit 0; }
 
-# Shutdown droplet if running
-if [ "$DROPLET_STATUS" = "active" ]; then
+# --- Shutdown ---
+if [[ "$DROPLET_STATUS" == "active" ]]; then
   echo ""
-  echo "Shutting down droplet for clean snapshot..."
-  
-  SHUTDOWN_RESPONSE=$(curl -s -X POST "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions" \
-    -H "Authorization: Bearer $DO_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"type": "shutdown"}')
-  
-  SHUTDOWN_ACTION_ID=$(echo $SHUTDOWN_RESPONSE | jq -r '.action.id')
-  
-  if [ "$SHUTDOWN_ACTION_ID" = "null" ]; then
-    echo "Failed to initiate shutdown:"
-    echo $SHUTDOWN_RESPONSE | jq
-    exit 1
-  fi
-  
-  # Wait for shutdown to complete
-  echo "Waiting for shutdown to complete..."
-  while true; do
-    ACTION_STATUS=$(curl -s "https://api.digitalocean.com/v2/actions/$SHUTDOWN_ACTION_ID" \
-      -H "Authorization: Bearer $DO_TOKEN" | jq -r '.action.status')
-    
-    if [ "$ACTION_STATUS" = "completed" ]; then
-      echo "Shutdown complete."
-      break
-    elif [ "$ACTION_STATUS" = "errored" ]; then
-      echo "Shutdown failed. Trying power off..."
-      curl -s -X POST "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions" \
-        -H "Authorization: Bearer $DO_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{"type": "power_off"}' > /dev/null
-      sleep 10
-      break
+  info "Shutting down droplet for clean snapshot..."
+  CURRENT_OP="shutdown droplet $DROPLET_ID ($DROPLET_NAME)"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY-RUN] doctl compute droplet-action shutdown $DROPLET_ID --wait"
+  else
+    if ! doctl_cmd compute droplet-action shutdown "$DROPLET_ID" \
+         --wait --output json > /dev/null 2>&1; then
+      warn "Graceful shutdown failed — attempting power-off..."
+      CURRENT_OP="power-off droplet $DROPLET_ID ($DROPLET_NAME)"
+      doctl_cmd compute droplet-action power-off "$DROPLET_ID" \
+        --wait --output json > /dev/null || {
+        err "Power-off failed. Check droplet state in console before proceeding."
+        exit 1
+      }
     fi
-    
-    echo "  Status: $ACTION_STATUS..."
-    sleep 5
-  done
-else
-  echo ""
-  echo "Droplet is already off."
-fi
-
-# Create snapshot
-echo ""
-echo "Creating snapshot '$SNAPSHOT_NAME'..."
-SNAPSHOT_RESPONSE=$(curl -s -X POST "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions" \
-  -H "Authorization: Bearer $DO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"type\": \"snapshot\", \"name\": \"$SNAPSHOT_NAME\"}")
-
-SNAPSHOT_ACTION_ID=$(echo $SNAPSHOT_RESPONSE | jq -r '.action.id')
-
-if [ "$SNAPSHOT_ACTION_ID" = "null" ]; then
-  echo "Failed to initiate snapshot:"
-  echo $SNAPSHOT_RESPONSE | jq
-  exit 1
-fi
-
-# Wait for snapshot to complete
-echo "Waiting for snapshot to complete (this may take several minutes)..."
-while true; do
-  ACTION_STATUS=$(curl -s "https://api.digitalocean.com/v2/actions/$SNAPSHOT_ACTION_ID" \
-    -H "Authorization: Bearer $DO_TOKEN" | jq -r '.action.status')
-  
-  if [ "$ACTION_STATUS" = "completed" ]; then
-    echo "Snapshot complete!"
-    break
-  elif [ "$ACTION_STATUS" = "errored" ]; then
-    echo "Snapshot failed!"
-    exit 1
+    ok "Droplet stopped."
   fi
-  
-  echo "  Status: $ACTION_STATUS..."
-  sleep 10
-done
+  CURRENT_OP=""
+else
+  info "Droplet is already off."
+fi
 
-# Get the new snapshot ID
+# --- Create snapshot ---
 echo ""
-echo "Fetching snapshot details..."
-NEW_SNAPSHOTS=$(curl -s "https://api.digitalocean.com/v2/snapshots?resource_type=droplet" \
-  -H "Authorization: Bearer $DO_TOKEN")
-NEW_SNAPSHOT=$(echo "$NEW_SNAPSHOTS" | jq -r ".snapshots[] | select(.name == \"$SNAPSHOT_NAME\")")
-NEW_SNAPSHOT_ID=$(echo "$NEW_SNAPSHOT" | jq -r '.id')
-NEW_SNAPSHOT_SIZE=$(echo "$NEW_SNAPSHOT" | jq -r '.size_gigabytes')
-NEW_SNAPSHOT_MIN_DISK=$(echo "$NEW_SNAPSHOT" | jq -r '.min_disk_size')
+info "Creating snapshot '$SNAPSHOT_NAME' (this may take several minutes)..."
+CURRENT_OP="snapshot droplet $DROPLET_ID ($DROPLET_NAME)"
+CREATED_RESOURCE="snapshot of $DROPLET_NAME"
 
-echo ""
-echo "========================================"
-echo "Snapshot Created Successfully"
-echo "========================================"
-echo "  ID: $NEW_SNAPSHOT_ID"
-echo "  Name: $SNAPSHOT_NAME"
-echo "  Size: ${NEW_SNAPSHOT_SIZE}GB"
-echo "  Min Disk: ${NEW_SNAPSHOT_MIN_DISK}GB"
-echo "========================================"
+if [[ "$DRY_RUN" == true ]]; then
+  info "[DRY-RUN] doctl compute droplet-action snapshot $DROPLET_ID --snapshot-name \"$SNAPSHOT_NAME\" --wait"
+  NEW_SNAPSHOT_ID="(dry-run)"
+  NEW_SNAPSHOT_SIZE="0"
+  NEW_SNAPSHOT_MIN_DISK="$DROPLET_DISK"
+  NEW_SNAPSHOT_REGIONS="$DROPLET_REGION"
+  COST_EST="0.00"
+else
+  doctl_cmd compute droplet-action snapshot "$DROPLET_ID" \
+    --snapshot-name "$SNAPSHOT_NAME" \
+    --wait \
+    --output json > /dev/null
+  ok "Snapshot complete."
 
-# Ask what to do with the droplet
+  # Fetch snapshot details — most recently created match avoids name-collision bugs
+  echo ""
+  info "Fetching snapshot details..."
+  SNAP_JSON=$(doctl_cmd compute snapshot list --resource droplet --output json | \
+    jq --arg name "$SNAPSHOT_NAME" \
+    '[.[] | select(.name == $name)] | sort_by(.created_at) | last')
+
+  NEW_SNAPSHOT_ID=$(echo "$SNAP_JSON"       | jq -r '.id')
+  NEW_SNAPSHOT_SIZE=$(echo "$SNAP_JSON"     | jq -r '.size_gigabytes')
+  NEW_SNAPSHOT_MIN_DISK=$(echo "$SNAP_JSON" | jq -r '.min_disk_size')
+  NEW_SNAPSHOT_REGIONS=$(echo "$SNAP_JSON"  | jq -r '.regions | join(", ")')
+  COST_EST=$(echo "$SNAP_JSON" | jq -r '(.size_gigabytes * 0.06 * 100 | round) / 100 | tostring')
+fi
+
+CURRENT_OP=""
+CREATED_RESOURCE=""
+
+header "Snapshot Created"
+info "ID:         $NEW_SNAPSHOT_ID"
+info "Name:       $SNAPSHOT_NAME"
+info "Compressed: ${NEW_SNAPSHOT_SIZE}GB  (source disk: ${NEW_SNAPSHOT_MIN_DISK}GB)"
+info "Regions:    $NEW_SNAPSHOT_REGIONS"
+[[ "$DRY_RUN" == false ]] && info "Est. cost:  ~\$${COST_EST}/mo"
 echo ""
-echo "What would you like to do with the droplet?"
-POST_OPTIONS=("start|Start it back up" "leave|Leave it shut down" "delete|Delete/destroy it")
-SELECTED=$(select_option "Select action:" "${POST_OPTIONS[@]}")
+[[ "$DRY_RUN" == false ]] && info "Restore:    ./do-restore.sh  # select: $SNAPSHOT_NAME"
+echo ""
+
+# --- Post-snapshot action ---
+POST_OPTIONS=(
+  "start|Start it back up"
+  "leave|Leave it shut down (billing continues)"
+  "delete|Delete/destroy it"
+)
+SELECTED=$(select_option "What to do with the droplet?" "${POST_OPTIONS[@]}")
 POST_ACTION=$(echo "$SELECTED" | cut -d'|' -f1)
 
 case "$POST_ACTION" in
   start)
     echo ""
-    echo "Starting droplet..."
-    curl -s -X POST "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions" \
-      -H "Authorization: Bearer $DO_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"type": "power_on"}' > /dev/null
-    
-    echo "Waiting for droplet to become active..."
-    while true; do
-      STATUS=$(curl -s "https://api.digitalocean.com/v2/droplets/$DROPLET_ID" \
-        -H "Authorization: Bearer $DO_TOKEN" | jq -r '.droplet.status')
-      
-      if [ "$STATUS" = "active" ]; then
-        echo "Droplet is active!"
-        if [ -n "$DROPLET_RESERVED_IP" ]; then
-          echo "Connect with: ssh root@$DROPLET_RESERVED_IP"
-        else
-          echo "Connect with: ssh root@$DROPLET_IP"
-        fi
-        break
-      fi
-      
-      echo "  Status: $STATUS..."
-      sleep 5
-    done
+    info "Starting droplet..."
+    CURRENT_OP="power-on droplet $DROPLET_ID ($DROPLET_NAME)"
+
+    if [[ "$DRY_RUN" == true ]]; then
+      info "[DRY-RUN] doctl compute droplet-action power-on $DROPLET_ID --wait"
+    else
+      doctl_cmd compute droplet-action power-on "$DROPLET_ID" \
+        --wait --output json > /dev/null
+      LIVE_IP=$(doctl_cmd compute droplet get "$DROPLET_ID" --output json | \
+        jq -r 'first(.[].networks.v4[] | select(.type == "public") | .ip_address)')
+      CONNECT_IP="${DROPLET_RESERVED_IP:-$LIVE_IP}"
+      ok "Droplet is active."
+      info "Connect: ssh root@$CONNECT_IP"
+    fi
+    CURRENT_OP=""
     ;;
-    
+
   leave)
     echo ""
-    echo "Droplet left shut down."
-    echo "Note: You are still being billed for the droplet while it exists."
+    info "Droplet left shut down."
+    warn "Billing continues while the droplet exists."
     ;;
-    
+
   delete)
     echo ""
-    if [ -n "$DROPLET_RESERVED_IP" ]; then
-      echo "WARNING: This droplet has reserved IP $DROPLET_RESERVED_IP assigned."
-      echo "The reserved IP will be unassigned but NOT deleted."
+    if [[ -n "$DROPLET_RESERVED_IP" ]]; then
+      warn "Reserved IP $DROPLET_RESERVED_IP will be unassigned but NOT deleted."
+      warn "Reserved IPs continue to accrue charges (~\$5/mo) until deleted."
     fi
     echo ""
-    read -p "Are you sure you want to DELETE droplet '$DROPLET_NAME'? This cannot be undone. (yes/no): " DELETE_CONFIRM
-    
-    if [ "$DELETE_CONFIRM" = "yes" ]; then
-      echo "Deleting droplet..."
-      DELETE_RESPONSE=$(curl -s -X DELETE "https://api.digitalocean.com/v2/droplets/$DROPLET_ID" \
-        -H "Authorization: Bearer $DO_TOKEN" \
-        -w "%{http_code}")
-      
-      if [ "$DELETE_RESPONSE" = "204" ]; then
-        echo "Droplet deleted successfully."
-        echo ""
-        echo "Your snapshot '$SNAPSHOT_NAME' (ID: $NEW_SNAPSHOT_ID) is preserved."
-        echo "Use do-restore.sh to restore from this snapshot later."
+    read -rp "  Type the droplet name '$DROPLET_NAME' to confirm deletion: " DELETE_CONFIRM
+
+    if [[ "$DELETE_CONFIRM" == "$DROPLET_NAME" ]]; then
+      CURRENT_OP="delete droplet $DROPLET_ID ($DROPLET_NAME)"
+
+      if [[ "$DRY_RUN" == true ]]; then
+        info "[DRY-RUN] doctl compute droplet delete $DROPLET_ID --force"
       else
-        echo "Failed to delete droplet. HTTP status: $DELETE_RESPONSE"
+        doctl_cmd compute droplet delete "$DROPLET_ID" --force
+        ok "Droplet '$DROPLET_NAME' deleted."
+        echo ""
+        info "Snapshot preserved:  $SNAPSHOT_NAME"
+        info "Snapshot ID:         $NEW_SNAPSHOT_ID"
+        info "Compressed size:     ${NEW_SNAPSHOT_SIZE}GB"
+        info "Source disk:         ${NEW_SNAPSHOT_MIN_DISK}GB"
+        info "Storage cost:        ~\$${COST_EST}/mo"
+        echo ""
+        info "Restore command:     ./do-restore.sh"
       fi
+      CURRENT_OP=""
     else
-      echo "Deletion cancelled. Droplet left shut down."
+      info "Deletion cancelled. Droplet left shut down."
     fi
     ;;
 esac
 
+# --- JSON output ---
+if [[ "$JSON_OUT" == true ]]; then
+  jq -n \
+    --arg  droplet_id      "$DROPLET_ID" \
+    --arg  droplet_name    "$DROPLET_NAME" \
+    --arg  snapshot_id     "$NEW_SNAPSHOT_ID" \
+    --arg  snapshot_name   "$SNAPSHOT_NAME" \
+    --arg  snapshot_size   "$NEW_SNAPSHOT_SIZE" \
+    --arg  min_disk        "$NEW_SNAPSHOT_MIN_DISK" \
+    --arg  regions         "$NEW_SNAPSHOT_REGIONS" \
+    --arg  post_action     "$POST_ACTION" \
+    --arg  reserved_ip     "$DROPLET_RESERVED_IP" \
+    '{
+      droplet_id:    $droplet_id,
+      droplet_name:  $droplet_name,
+      snapshot_id:   $snapshot_id,
+      snapshot_name: $snapshot_name,
+      snapshot_size_gb: ($snapshot_size | tonumber? // $snapshot_size),
+      min_disk_gb:   ($min_disk | tonumber? // $min_disk),
+      regions:       ($regions | split(", ")),
+      post_action:   $post_action,
+      reserved_ip:   $reserved_ip
+    }'
+fi
+
 echo ""
-echo "Done!"
+ok "Done."

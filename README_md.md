@@ -1,106 +1,180 @@
 # DigitalOcean Snapshot Scripts
 
-Two companion scripts for managing DigitalOcean droplet snapshots: one for creating snapshots and one for restoring from them. Designed for cost-effective on-demand server usage—snapshot your droplet, delete it to stop compute charges, then restore later when needed.
+Two companion scripts for managing DigitalOcean droplet snapshots: create a snapshot from a running droplet, then restore a new droplet from that snapshot. Designed for cost-effective on-demand usage — snapshot and delete when idle, restore when needed, with the same reserved IP so DNS and Cloudflare configs remain valid.
 
 ## Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `do-snapshot.sh` | Create a snapshot from an existing droplet |
-| `do-restore.sh` | Restore a new droplet from a snapshot |
+| `do-snapshot.sh` | Snapshot an existing droplet, then start / leave / delete it |
+| `do-restore.sh` | Create a new droplet from a snapshot and assign a reserved IP |
+
+---
 
 ## Requirements
 
-- `curl` — for API requests
-- `jq` — for JSON parsing
-- `fzf` (optional) — for arrow-key selection menus; falls back to numbered menus if not installed
+### Required
 
-### Installing dependencies
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `doctl` | DigitalOcean CLI — replaces all raw API calls | `brew install doctl` |
+| `jq` | JSON parsing for doctl output | `brew install jq` |
+
+### Optional
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `fzf` | Arrow-key selection menus (falls back to numbered menus) | `brew install fzf` |
+| `1password-cli` | Secure token injection via `op read` | `brew install 1password-cli` |
+
+### Ubuntu/Debian equivalents
 
 ```bash
-# macOS
-brew install jq fzf
+# doctl — download the binary directly (no apt package)
+curl -sL https://github.com/digitalocean/doctl/releases/latest/download/doctl-*-linux-amd64.tar.gz \
+  | tar -xz && sudo mv doctl /usr/local/bin
 
-# Ubuntu/Debian
 sudo apt install jq fzf
 ```
 
-## API Token Setup
+---
 
-Create a custom-scoped API token at [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens).
+## One-Time Setup
 
-### Scopes for `do-snapshot.sh`
-
-| Resource | Permissions | Purpose |
-|----------|-------------|---------|
-| Droplet | read, create, delete | List droplets, create snapshot action, delete droplet (optional) |
-| Snapshot | read | Fetch new snapshot details |
-| Reserved IP | read | Check if droplet has a reserved IP |
-
-### Scopes for `do-restore.sh`
-
-| Resource | Permissions | Purpose |
-|----------|-------------|---------|
-| Droplet | read, create | Check status, create new droplet |
-| Snapshot | read | List snapshots and get details |
-| SSH Key | read | List available SSH keys |
-| Reserved IP | read, update | List and assign reserved IPs (optional) |
-
-### Providing the token
+### 1. Authenticate doctl
 
 ```bash
-# Option 1: Environment variable
-export DO_TOKEN="dop_v1_xxxx"
+doctl auth init --context snaprestore
+# Paste your DigitalOcean API token when prompted.
+# The token is stored in ~/.config/doctl/config.yaml (mode 0600).
+# It is never written to a script file or shell history.
+```
 
-# Option 2: Edit the script's configuration section
-DO_TOKEN="dop_v1_xxxx"
+Set the context name in both scripts:
 
-# Option 3: Enter when prompted
+```bash
+DOCTL_CONTEXT="snaprestore"   # in do-snapshot.sh and do-restore.sh config block
+```
+
+### 2. (Optional) 1Password integration
+
+Store your token in 1Password, then set `OP_ITEM` in the config block:
+
+```bash
+OP_ITEM="op://Private/DigitalOcean API Token/credential"
+```
+
+Create the vault item:
+
+```bash
+op item create \
+  --category login \
+  --title "DigitalOcean API Token" \
+  --vault Private \
+  "credential=dop_v1_xxxx"
+```
+
+The scripts will call `op read "$OP_ITEM"` at startup. If `op` is not installed or the read fails, they fall back to the `DIGITALOCEAN_ACCESS_TOKEN` environment variable, then prompt interactively (with hidden input).
+
+**Recommended vault path convention:**
+
+| Secret | 1Password path |
+|--------|---------------|
+| DO API token | `op://Private/DigitalOcean API Token/credential` |
+
+### 3. API token scopes
+
+Create a custom-scoped token at [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens).
+
+**`do-snapshot.sh` requires:**
+
+| Resource | Permissions |
+|----------|-------------|
+| Droplet | read, delete |
+| Droplet Action | create (shutdown, power-off, power-on, snapshot) |
+| Snapshot | read |
+| Reserved IP | read |
+
+**`do-restore.sh` requires:**
+
+| Resource | Permissions |
+|----------|-------------|
+| Droplet | read, create |
+| Droplet Action | create |
+| Snapshot | read |
+| SSH Key | read |
+| Reserved IP | read, update |
+
+---
+
+## Token Loading Order
+
+Both scripts resolve the token in this order (first non-empty value wins):
+
+1. `OP_ITEM` config var → calls `op read` if `op` CLI is present
+2. `DIGITALOCEAN_ACCESS_TOKEN` environment variable
+3. `DO_API_TOKEN` environment variable (legacy fallback)
+4. `DOCTL_CONTEXT` config var → doctl uses its stored context token (no env var needed)
+5. Interactive prompt — input is hidden (`read -rsp`)
+
+**Never hardcode a token in the script.** Use one of the methods above.
+
+To inject via environment without hardcoding:
+
+```bash
+export DIGITALOCEAN_ACCESS_TOKEN="$(op read 'op://Private/DigitalOcean API Token/credential')"
 ./do-snapshot.sh
-# DigitalOcean API Token: _
+```
+
+Or use `op run` to inject automatically:
+
+```bash
+op run --env-file=.env -- ./do-snapshot.sh
+# .env contains: DIGITALOCEAN_ACCESS_TOKEN=op://Private/DigitalOcean API Token/credential
 ```
 
 ---
 
 ## do-snapshot.sh
 
-Creates a snapshot from an existing droplet following best practices: displays droplet specs, performs a clean shutdown, creates the snapshot, then lets you choose what to do with the original droplet.
+Snapshots an existing droplet. Performs a clean shutdown first, waits for the action to complete, then lets you start, leave, or delete the droplet.
 
-### What it does
+### Flags
 
-1. Lists your droplets for selection
-2. Displays full droplet specs (size, region, disk, IPs, reserved IP)
-3. Prompts for a snapshot name (or uses auto-generated default)
-4. Shuts down the droplet gracefully for a clean snapshot
-5. Creates the snapshot and waits for completion
-6. Displays the new snapshot details
-7. Asks what to do with the droplet: start it, leave it off, or delete it
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print every operation that would run; make no API calls |
+| `--quiet` | Suppress all non-error output |
+| `--json` | Emit final state as a JSON object on stdout |
+| `--log FILE` | Tee all output to FILE (appends) |
+| `--help` | Show usage |
+
+### Configuration block
+
+```bash
+DROPLET_ID=""       # Set to a droplet ID, or leave blank for interactive selection
+SNAPSHOT_NAME=""    # Optional: defaults to {droplet-name}-snapshot-{YYYYMMDD-HHMM}
+OP_ITEM=""          # Optional: op://Vault/Item/field
+DOCTL_CONTEXT=""    # Optional: doctl auth context, e.g. "snaprestore"
+```
 
 ### Usage
 
-**Interactive mode:**
 ```bash
+# Fully interactive
 ./do-snapshot.sh
-```
 
-**List droplets only:**
-```bash
-# Edit script:
-DROPLET_ID="list"
+# List droplets only
+DROPLET_ID="list" ./do-snapshot.sh    # or edit config var
 
-# Then run:
-./do-snapshot.sh
-```
+# Dry-run (no API writes)
+./do-snapshot.sh --dry-run
 
-**Pre-configured:**
-```bash
-# Edit script:
-DO_TOKEN="dop_v1_xxxx"
-DROPLET_ID="123456789"
-SNAPSHOT_NAME="my-backup-2026-01-03"
+# Log to file
+./do-snapshot.sh --log ~/.local/share/do-snap-tool/snapshot-$(date +%Y%m%d).log
 
-# Then run:
-./do-snapshot.sh
+# JSON output (for scripting)
+./do-snapshot.sh --json 2>/dev/null | jq .snapshot_id
 ```
 
 ### Example session
@@ -108,110 +182,128 @@ SNAPSHOT_NAME="my-backup-2026-01-03"
 ```
 $ ./do-snapshot.sh
 
-Fetching droplets...
+  Fetching droplets...
 
 Select droplet to snapshot:
 > 123456789|web-server|active|s-2vcpu-4gb|nyc1|80GB
   987654321|dev-box|off|s-1vcpu-1gb|sfo3|25GB
 
 ========================================
-Droplet Details
+  Droplet Details
 ========================================
-  ID: 123456789
-  Name: web-server
-  Status: active
-  Region: nyc1
-  Size: s-2vcpu-4gb
-  vCPUs: 2
-  Memory: 4096MB
-  Disk: 80GB
-  Public IP: 164.90.xxx.xxx
+  ID:          123456789
+  Name:        web-server
+  Status:      active
+  Region:      nyc1
+  Size:        s-2vcpu-4gb
+  vCPUs:       2
+  Memory:      4096MB
+  Disk:        80GB
+  Public IP:   164.90.xxx.xxx
   Reserved IP: 167.99.xxx.xxx
-========================================
 
-Snapshot name [web-server-snapshot-20260103-1430]: 
+  Snapshot name [web-server-snapshot-20260526-1430]:
+
+  Snapshot will be named: web-server-snapshot-20260526-1430
 
 Proceed with snapshot? (y/n): y
 
-Shutting down droplet for clean snapshot...
-Waiting for shutdown to complete...
-  Status: in-progress...
-Shutdown complete.
+  Shutting down droplet for clean snapshot...
+  ✓ Droplet stopped.
 
-Creating snapshot 'web-server-snapshot-20260103-1430'...
-Waiting for snapshot to complete (this may take several minutes)...
-  Status: in-progress...
-  Status: in-progress...
-Snapshot complete!
+  Creating snapshot 'web-server-snapshot-20260526-1430' (this may take several minutes)...
+  ✓ Snapshot complete.
+
+  Fetching snapshot details...
 
 ========================================
-Snapshot Created Successfully
+  Snapshot Created
 ========================================
-  ID: 119876543
-  Name: web-server-snapshot-20260103-1430
-  Size: 12.34GB
-  Min Disk: 80GB
-========================================
+  ID:         119876543
+  Name:       web-server-snapshot-20260526-1430
+  Compressed: 12.34GB  (source disk: 80GB)
+  Regions:    nyc1
+  Est. cost:  ~$0.74/mo
 
-What would you like to do with the droplet?
+  Restore:    ./do-restore.sh  # select: web-server-snapshot-20260526-1430
+
+What to do with the droplet?
 > start|Start it back up
-  leave|Leave it shut down
+  leave|Leave it shut down (billing continues)
   delete|Delete/destroy it
 
-Starting droplet...
-Droplet is active!
-Connect with: ssh root@167.99.xxx.xxx
+  Starting droplet...
+  ✓ Droplet is active.
+  Connect: ssh root@167.99.xxx.xxx
 
-Done!
+  ✓ Done.
+```
+
+### JSON output shape
+
+```json
+{
+  "droplet_id":    "123456789",
+  "droplet_name":  "web-server",
+  "snapshot_id":   "119876543",
+  "snapshot_name": "web-server-snapshot-20260526-1430",
+  "snapshot_size_gb": 12.34,
+  "min_disk_gb":   80,
+  "regions":       ["nyc1"],
+  "post_action":   "start",
+  "reserved_ip":   "167.99.xxx.xxx"
+}
 ```
 
 ---
 
 ## do-restore.sh
 
-Restores a new droplet from an existing snapshot. Handles size compatibility, SSH keys, and reserved IP assignment.
+Creates a new droplet from a snapshot, waits for it to become active, then assigns a reserved IP.
 
-### What it does
+### Flags
 
-1. Lists your snapshots for selection
-2. Displays snapshot details (size, minimum disk requirement, region)
-3. Lists compatible droplet sizes (filters to sizes with sufficient disk space)
-4. Optionally configures SSH key
-5. Optionally assigns a reserved IP
-6. Creates the droplet and waits for it to become active
-7. Displays connection information
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print every operation that would run; make no API calls |
+| `--quiet` | Suppress all non-error output |
+| `--json` | Emit final state as a JSON object on stdout |
+| `--log FILE` | Tee all output to FILE (appends) |
+| `--tags TAGS` | Comma-separated tags to apply to the new droplet |
+| `--help` | Show usage |
+
+### Configuration block
+
+```bash
+SNAPSHOT_ID=""      # Snapshot ID, or leave blank for interactive selection
+SSH_KEY_ID=""       # SSH key ID (comma-separated for multiple), or blank to prompt
+SIZE_SLUG=""        # Droplet size slug, or blank to prompt
+DROPLET_NAME=""     # Optional: defaults to restored-{snapshot-name}-{YYYYMMDD}
+RESERVED_IP=""      # Reserved IP to assign, or blank to prompt
+OP_ITEM=""          # Optional: op://Vault/Item/field
+DOCTL_CONTEXT=""    # Optional: doctl auth context, e.g. "snaprestore"
+```
 
 ### Usage
 
-**Interactive mode:**
 ```bash
+# Fully interactive
 ./do-restore.sh
-```
 
-**List resources:**
-```bash
-# Edit script with any of these:
-SNAPSHOT_ID="list"      # List snapshots
-SSH_KEY_ID="list"       # List SSH keys
-SIZE_SLUG="list"        # List compatible sizes (requires SNAPSHOT_ID set)
-RESERVED_IP="list"      # List reserved IPs
+# List resources
+SNAPSHOT_ID="list"  ./do-restore.sh    # List snapshots
+SSH_KEY_ID="list"   ./do-restore.sh    # List SSH keys
+SIZE_SLUG="list"    ./do-restore.sh    # List compatible sizes (requires SNAPSHOT_ID set)
+RESERVED_IP="list"  ./do-restore.sh    # List reserved IPs
 
-# Then run:
-./do-restore.sh
-```
+# With tags
+./do-restore.sh --tags "project:dh,env:prod"
 
-**Pre-configured:**
-```bash
-# Edit script:
-DO_TOKEN="dop_v1_xxxx"
-SNAPSHOT_ID="119876543"
-SSH_KEY_ID="12345678"
-SIZE_SLUG="s-2vcpu-4gb"
-DROPLET_NAME="restored-web-server"
-RESERVED_IP="167.99.xxx.xxx"
+# Dry-run
+./do-restore.sh --dry-run
 
-# Then run:
-./do-restore.sh
+# JSON output
+./do-restore.sh --json 2>/dev/null | jq .connect_ip
 ```
 
 ### Example session
@@ -219,196 +311,129 @@ RESERVED_IP="167.99.xxx.xxx"
 ```
 $ ./do-restore.sh
 
-Fetching snapshots...
+  Fetching snapshots...
 
 Select snapshot:
-> 119876543|web-server-snapshot-20260103|12.34GB|min:80GB|nyc1
-  118765432|dev-backup-20251215|5.67GB|min:25GB|sfo3
+> 119876543|web-server-snapshot-20260526-1430|12.34GB|min:80GB|nyc1|0d ago
+  118765432|dev-backup-20251215|5.67GB|min:25GB|sfo3|162d ago
 
-Selected: web-server-snapshot-20260103
-Size: 12.34GB (min disk: 80GB)
-Region: nyc1
+  Selected:     web-server-snapshot-20260526-1430
+  Compressed:   12.34GB  (source disk: 80GB)
+  Created:      2026-05-26T14:30:00Z  (0 days ago)
+  Regions:      nyc1
 
-Fetching droplet sizes...
+  Fetching compatible droplet sizes...
 
 Select droplet size:
-> s-2vcpu-4gb|2vCPU|4096MB|80GB|$24/mo
-  s-4vcpu-8gb|4vCPU|8192MB|160GB|$48/mo
-  s-8vcpu-16gb|8vCPU|16384MB|320GB|$96/mo
+> s-2vcpu-4gb|2vCPU|4096MB|80GB disk|$24/mo
+  s-4vcpu-8gb|4vCPU|8192MB|160GB disk|$48/mo
 
-Selected size: s-2vcpu-4gb
+  Size: s-2vcpu-4gb
 
-Fetching SSH keys...
-
-Does this droplet require an SSH key? (y/n): y
+  Fetching SSH keys...
+  Attach an SSH key? (y/n): y
 
 Select SSH key:
 > 12345678|my-macbook
-  87654321|work-laptop
 
-Selected SSH key: 12345678
+  SSH key: 12345678
 
-Assign a reserved IP? (y/n): y
-
-Fetching reserved IPs...
+  Assign a reserved IP? (y/n): y
 
 Select reserved IP:
 > 167.99.xxx.xxx|unassigned|nyc1
 
-Selected reserved IP: 167.99.xxx.xxx
-
-Droplet name [restored-web-server-snapshot-20260103-20260103]: web-server
-
-========================================
-Creating droplet:
-  Name: web-server
-  Size: s-2vcpu-4gb
-  Region: nyc1
-  Image: 119876543 (web-server-snapshot-20260103)
-  SSH Keys: ["12345678"]
   Reserved IP: 167.99.xxx.xxx
+  Droplet name [restored-web-server-snapshot-20260526-1430-20260526]: web-server
+
 ========================================
+  Creating Droplet
+========================================
+  Name:        web-server
+  Size:        s-2vcpu-4gb
+  Region:      nyc1
+  Image:       119876543 (web-server-snapshot-20260526-1430)
+  SSH Key:     12345678
+  Reserved IP: 167.99.xxx.xxx
 
 Proceed? (y/n): y
 
-Created droplet: 456789123
-Waiting for droplet to become active...
-  Status: new...
-  Status: active...
+  Creating droplet (this may take 1–2 minutes)...
+  ✓ Droplet active.  ID: 456789123  IP: 164.90.xxx.xxx
 
-Droplet is active!
-  ID: 456789123
-  IP: 164.90.xxx.xxx
+  Assigning reserved IP 167.99.xxx.xxx to droplet 456789123...
+  ✓ Reserved IP assigned.
 
-Assigning reserved IP 167.99.xxx.xxx to droplet...
-Reserved IP assigned successfully!
+========================================
+  Done
+========================================
+  Droplet ID:    456789123
+  Droplet IP:    164.90.xxx.xxx
+  Reserved IP:   167.99.xxx.xxx
 
-Connect with: ssh root@167.99.xxx.xxx
+  Connect:       ssh root@167.99.xxx.xxx
+```
+
+### JSON output shape
+
+```json
+{
+  "droplet_id":    "456789123",
+  "droplet_name":  "web-server",
+  "droplet_ip":    "164.90.xxx.xxx",
+  "reserved_ip":   "167.99.xxx.xxx",
+  "connect_ip":    "167.99.xxx.xxx",
+  "snapshot_id":   "119876543",
+  "snapshot_name": "web-server-snapshot-20260526-1430",
+  "size":          "s-2vcpu-4gb",
+  "region":        "nyc1",
+  "tags":          ["project:dh", "env:prod"]
+}
 ```
 
 ---
 
 ## Docker Auto-Start Configuration
 
-For Docker containers to start automatically when restoring from a snapshot, you need two things configured on the original droplet:
+For Docker containers to start automatically after a restore:
 
-### 1. Enable Docker service on boot
-
-The Docker daemon must be set to start automatically when the system boots:
+### 1. Enable Docker on boot
 
 ```bash
 sudo systemctl enable docker
-```
-
-Verify it's enabled:
-
-```bash
-sudo systemctl is-enabled docker
-# Should output: enabled
+sudo systemctl is-enabled docker    # should output: enabled
 ```
 
 ### 2. Set restart policy on containers
 
-Containers need a restart policy to start when Docker starts.
-
-**For `docker run`:**
 ```bash
+# docker run
 docker run -d --restart=unless-stopped myapp
-```
 
-**For `docker-compose.yml`:**
-```yaml
+# docker-compose.yml
 services:
   myapp:
     image: myapp:latest
     restart: unless-stopped
-    # ... other config
-
-  database:
-    image: postgres:15
-    restart: unless-stopped
-    # ... other config
 ```
-
-### Restart policy options
 
 | Policy | Behavior |
 |--------|----------|
 | `no` | Never restart (default) |
 | `always` | Always restart, including on daemon start |
-| `unless-stopped` | Restart unless manually stopped |
+| `unless-stopped` | Restart unless manually stopped — recommended |
 | `on-failure` | Restart only on non-zero exit code |
 
-`unless-stopped` is generally recommended—it auto-starts on boot but respects manual `docker stop` commands.
-
-### Verify your setup
-
-Before creating a snapshot, confirm containers will auto-start:
+### 3. Verify before snapshotting
 
 ```bash
-# Check Docker is enabled
 sudo systemctl is-enabled docker
-
-# Check container restart policies
 docker inspect --format '{{.Name}}: {{.HostConfig.RestartPolicy.Name}}' $(docker ps -aq)
 ```
 
 ### Cloudflare Tunnels
 
-If you're using `cloudflared` for tunnels, the same rules apply. Ensure it has `restart: unless-stopped` in your compose file or was started with `--restart=unless-stopped`. The tunnel will automatically reconnect when the restored droplet boots—no IP address updates needed since traffic routes through Cloudflare.
-
-### If you forgot to set restart policies
-
-If you restored a droplet and your containers didn't start automatically, you have a few options:
-
-**Option 1: Start containers manually**
-
-SSH into the droplet and start your containers:
-
-```bash
-# For docker-compose
-cd /path/to/your/compose/directory
-docker compose up -d
-
-# For standalone containers (if you remember the run command)
-docker start container_name
-```
-
-**Option 2: Start all stopped containers**
-
-```bash
-docker start $(docker ps -aq)
-```
-
-**Option 3: Fix it for next time**
-
-Update running containers to have the correct restart policy without recreating them:
-
-```bash
-docker update --restart=unless-stopped $(docker ps -aq)
-```
-
-Or update your `docker-compose.yml` and recreate:
-
-```bash
-# Add restart: unless-stopped to each service, then:
-docker compose up -d
-```
-
-**Option 4: Find your original run commands**
-
-If you don't remember how containers were started:
-
-```bash
-# Show the original command for a container
-docker inspect --format '{{.Config.Cmd}}' container_name
-
-# Or use docker-autocompose to regenerate a compose file
-pip install docker-autocompose
-docker-autocompose container_name
-```
-
-After fixing, create a new snapshot so future restores work automatically.
+If you use `cloudflared`, give it `restart: unless-stopped` in your compose file. The tunnel reconnects automatically on boot — no IP updates needed since traffic routes through Cloudflare, and the reserved IP remains constant across snapshot/restore cycles.
 
 ---
 
@@ -416,56 +441,69 @@ After fixing, create a new snapshot so future restores work automatically.
 
 ### Cost-saving on-demand usage
 
-1. **Create and configure** your droplet with Docker containers, apps, etc.
-
-2. **Snapshot and delete** when not needed:
+1. **Snapshot and delete** when not needed:
    ```bash
    ./do-snapshot.sh
    # Select droplet → name snapshot → choose "delete"
+   # ~$0.74/mo snapshot storage vs. ~$24/mo running droplet
    ```
-   Now you're only paying ~$0.06/GB/month for snapshot storage.
 
-3. **Restore when needed**:
+2. **Restore when needed**:
    ```bash
    ./do-restore.sh
    # Select snapshot → choose size → assign reserved IP
+   # Same IP, same DNS, same Cloudflare config
    ```
-   Your server is back with the same reserved IP.
 
-4. **Repeat** as needed.
-
-### Tips
-
-- **Reserved IPs** let you maintain the same IP address across snapshot/restore cycles—useful for DNS, firewalls, etc.
-- **Docker containers** start automatically if you used `--restart=unless-stopped` or `restart: unless-stopped` in compose files.
-- **Snapshot while off** ensures filesystem consistency—both scripts handle this automatically.
-- **Min disk size** is locked when you create a snapshot. Use the smallest disk droplet you can for maximum restore flexibility.
+3. **Tips:**
+   - Reserved IPs preserve your IP across cycles. Keep them assigned.
+   - Snapshot while off ensures filesystem consistency — both scripts handle this.
+   - `min_disk_size` is locked to the source droplet's total disk at snapshot time, not actual used space. Use the smallest adequate disk droplet to maximize restore flexibility.
+   - Snapshot names default to `{droplet-name}-snapshot-{YYYYMMDD-HHMM}` — unique enough to avoid collision.
 
 ---
 
 ## Troubleshooting
 
-### "No compatible droplet sizes found"
+### `doctl: command not found`
 
-Your snapshot's minimum disk size exceeds available droplet sizes. This happens when the original droplet had a large disk. Options:
-- Look for premium/dedicated droplet types (may not be available)
-- Create a new smaller droplet and migrate data manually
-- Future snapshots: use smaller disk droplets
-
-### "Cannot create a droplet with a smaller disk than the image"
-
-Same issue as above—the snapshot requires a larger disk than the selected size.
-
-### Script hangs after "Created droplet: null"
-
-The API returned an error. Add error checking or run the curl command manually to see the response. Common causes: invalid IDs, wrong region, insufficient permissions.
-
-### fzf not working
-
-The script falls back to numbered menus automatically. If you want arrow-key selection, install fzf:
 ```bash
-brew install fzf   # macOS
-sudo apt install fzf   # Ubuntu/Debian
+brew install doctl
+doctl auth init --context snaprestore
+```
+
+### `unable to initialize DigitalOcean API client: access token is required`
+
+No token was found. Set `DOCTL_CONTEXT` in the config block, or export `DIGITALOCEAN_ACCESS_TOKEN`, or set `OP_ITEM` pointing to your 1Password vault entry.
+
+### `op read failed`
+
+1. Confirm `op` is signed in: `op account list`
+2. Confirm the vault path is correct: `op read 'op://Private/DigitalOcean API Token/credential'`
+3. If 1Password CLI is not installed, remove `OP_ITEM` from the config block — the script falls back to the env var.
+
+### `No compatible droplet sizes found`
+
+The snapshot's `min_disk_size` exceeds every available size in the region. This happens when the original droplet had a large disk. Options:
+- Resize the original droplet to a smaller disk before snapshotting (requires migration)
+- Future snapshots: start with the smallest adequate disk droplet
+
+### `Reserved IP assignment did not complete`
+
+The script prints a manual fallback command. Run it after checking the console:
+```bash
+doctl compute reserved-ip-action assign <IP> <droplet-id>
+```
+
+### `Script hangs / no output`
+
+With `doctl --wait`, the command polls until the action completes or times out (doctl default: 600 s for actions, longer for droplet create). If it exceeds this, doctl exits non-zero and the cleanup trap prints the interrupted operation and resource ID.
+
+### `fzf not working`
+
+The script falls back to numbered menus automatically. To get arrow-key selection:
+```bash
+brew install fzf
 ```
 
 ---
