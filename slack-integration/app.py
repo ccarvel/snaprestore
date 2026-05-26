@@ -67,9 +67,9 @@ def lambda_handler(event, context):
     
     # Map slash command to script
     if command == '/do-snap':
-        shell_cmd = f"export DROPLET_ID='{text}' && ./do-snapshot_sh.sh --force"
+        shell_cmd = f"export DROPLET_ID='{text}' && ./do-snapshot.sh --force"
     elif command == '/do-restore':
-        shell_cmd = f"export SNAPSHOT_ID='{text}' && ./do-restore_sh.sh --force"
+        shell_cmd = f"export SNAPSHOT_ID='{text}' && ./do-restore.sh --force"
     else:
         return {'statusCode': 200, 'body': 'Unknown command'}
         
