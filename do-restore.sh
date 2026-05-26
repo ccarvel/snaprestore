@@ -75,15 +75,20 @@ NEW_DROPLET_ID=""
 
 cleanup() {
   local code=$?
-  ui_spinner_stop
+  ui_spinner_stop  # kills spinner → closes its copy of the pipe write-end
   if [[ $code -ne 0 && -n "$CURRENT_OP" ]]; then
     echo "" >&2
     ui_warn "Interrupted during: $CURRENT_OP"
     [[ -n "$NEW_DROPLET_ID" ]] && ui_warn "Partially provisioned droplet ID: $NEW_DROPLET_ID — check console"
     ui_warn "Check console: https://cloud.digitalocean.com/droplets"
   fi
-  # wait for tee to drain before the process exits
-  [[ -n "$_TEE_PID" ]] && wait "$_TEE_PID" 2>/dev/null || true
+  # Close our copy of stdout/stderr (the pipe write-end) so tee gets EOF,
+  # then wait for tee to finish draining. Without this, tee blocks forever
+  # because the disowned spinner held the write-end open.
+  if [[ -n "$_TEE_PID" ]]; then
+    exec 1>&- 2>&-
+    wait "$_TEE_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
@@ -359,6 +364,8 @@ else
     ui_spinner_stop
     ui_err "Droplet creation failed:"
     head -5 "$local_tmpfile" >&2
+    # Write directly to terminal so the error is visible regardless of pipe state
+    { echo "--- doctl error output ---"; head -10 "$local_tmpfile"; } > /dev/tty 2>/dev/null || true
     rm -f "$local_tmpfile"
     exit 1
   fi
