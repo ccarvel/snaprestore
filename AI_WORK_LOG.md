@@ -1,4 +1,47 @@
 ---
+## 2026-05-26 — Session 3 (Codex)
+**Focus:** Documented new-user Slack-integrated testing setup and aligned secrets to the 1Password Private vault.
+
+### Files changed
+| File | Action | Commit |
+| --- | --- | --- |
+| `README.md` | Reworked new-user orientation, setup flow, Slack testing references, and Private vault references | `bf8f669`, `0482f85` |
+| `docs/setup-codex.md` | Added full setup/test guide and later added Private vault credential-source checklist | `bf8f669`, `0482f85` |
+| `docs/prompt-codex.md` | Moved `prompt-codex.md` under `docs/` | `bf8f669` |
+| `slack/README-slack.md` | Added Slack control-plane guide and later aligned secret references to Private | `bf8f669`, `0482f85` |
+| `.env.example` | Aligned documented 1Password references from `op://Automation/...` to `op://Private/...` | `0482f85` |
+| `.github/workflows/snaprestore-dispatch.yml` | Aligned 1Password secret references from `op://Automation/...` to `op://Private/...` | `0482f85` |
+| `ai_status.json` | Updated Relay state for this handoff | uncommitted |
+| `AI_WORK_LOG.md` | Prepended this Relay handoff entry | uncommitted |
+
+### Commands run
+```bash
+git switch next-codex
+git status --short --branch
+git log --oneline -5
+rg -n "Automation|Private|1Password|op://|OP_SERVICE_ACCOUNT_TOKEN|DigitalOcean|Slack|Cloudflare|GitHub" README.md docs/setup-codex.md slack/README-slack.md
+perl -0pi -e 's/op:\/\/Automation/op:\/\/Private/g; s/`Automation` vault/`Private` vault/g; s/vault is named `Automation`/vault is named `Private`/g' README.md docs/setup-codex.md slack/README-slack.md
+rg -n 'op://Automation|Automation' .env.example .github/workflows/snaprestore-dispatch.yml
+perl -0pi -e 's/op:\/\/Automation/op:\/\/Private/g' .env.example .github/workflows/snaprestore-dispatch.yml
+rg -n 'Automation' README.md docs/setup-codex.md slack/README-slack.md .env.example .github/workflows/snaprestore-dispatch.yml
+git add .env.example .github/workflows/snaprestore-dispatch.yml README.md docs/setup-codex.md slack/README-slack.md
+git commit -m "Align Snaprestore secrets with the Private vault" ...
+git push origin next-codex
+```
+
+### Validations
+- Read `README.md`, `docs/setup-codex.md`, and `slack/README-slack.md` three times as requested: pass
+- Verified no `Automation` references remain in `README.md`, `docs/setup-codex.md`, `slack/README-slack.md`, `.env.example`, or `.github/workflows/snaprestore-dispatch.yml`: pass
+- Verified branch push to `origin/next-codex` through `0482f85`: pass
+- Live DigitalOcean, Slack, Cloudflare Worker, GitHub Actions, and 1Password service account flows: not run
+
+### Outcome
+The setup documentation now consistently uses the 1Password `Private` vault and includes a credential-source checklist for all required services. The runnable `.env.example` and GitHub Actions workflow were also aligned to `op://Private/...` so the documented setup path matches runtime references. Two commits were pushed to `origin/next-codex`: `bf8f669` for the new setup docs and `0482f85` for Private vault alignment.
+
+### Next step
+Provision the documented Private vault items, then validate the DigitalOcean token reference: `op read 'op://Private/DigitalOcean API Token/credential' >/dev/null`
+
+---
 ## 2026-05-26 — Session 2 (Codex)
 **Focus:** Added a 1Password-oriented `.env.example` for local scripts and Slack/GitHub setup.
 

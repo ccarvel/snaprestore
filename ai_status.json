@@ -1,23 +1,27 @@
 {
   "last_updated": "2026-05-26",
-  "last_session": "session 2 — Codex",
-  "git_sha": "c9883f0",
-  "worktree_state": "1 unstaged, 4 untracked",
-  "current_focus": "Added a 1Password-oriented .env.example and allowed it through .gitignore.",
-  "exact_next_step": "Commit the environment example only: git add .env.example .gitignore && git commit -m \"Document environment setup with 1Password references\"",
+  "last_session": "session 3 — Codex",
+  "git_sha": "0482f85",
+  "worktree_state": "2 unstaged, 1 untracked",
+  "current_focus": "Documented new-user Slack-integrated testing setup and aligned 1Password references to the Private vault.",
+  "exact_next_step": "Provision the documented Private vault items, then validate the DigitalOcean token reference: op read 'op://Private/DigitalOcean API Token/credential' >/dev/null",
   "blockers": [
-    "Live Slack, Cloudflare Worker, GitHub workflow_dispatch, and DigitalOcean destructive/billable operations were not validated because they require external credentials and can create real infrastructure effects."
+    "Live Slack, Cloudflare Worker, GitHub workflow_dispatch, 1Password service account, and DigitalOcean destructive/billable operations were not validated because they require external credentials and can create real infrastructure effects."
   ],
   "open_tasks": [
-    "Commit .env.example and .gitignore if the environment documentation looks correct.",
+    "Provision the documented 1Password Private vault items and GitHub OP_SERVICE_ACCOUNT_TOKEN secret.",
     "Add elapsed-time counters and ETA/history tracking for polling/spinner paths required by prompt-codex.md Phase 5.",
     "Live-test Slack command flow after secrets are provisioned in 1Password, Cloudflare Worker, and GitHub Actions.",
     "Verify a real restore with the welcome-page cloud-init health check on a disposable Droplet/snapshot.",
     "Consider adding a separate full deploy Slack command if still required."
   ],
   "completed_this_session": [
-    "Created .env.example documenting local script variables, Slack/Cloudflare Worker secrets, GitHub Actions values, and 1Password op:// reference examples.",
-    "Updated .gitignore with an exception so .env.example can be tracked while real .env files stay ignored.",
-    "Reviewed .env.example contents and confirmed no literal DigitalOcean, Slack, or GitHub token values were present."
+    "Created docs/setup-codex.md with first-time setup and full test steps for local scripts, DigitalOcean, Cloudflare, GitHub Actions, Slack, and 1Password.",
+    "Created slack/README-slack.md with Slack control-plane setup, command usage, Worker deployment, and troubleshooting details.",
+    "Refreshed README.md as the new-user orientation guide and moved prompt-codex.md into docs/.",
+    "Committed and pushed bf8f669 to next-codex for the initial setup documentation work.",
+    "Changed all Snaprestore 1Password references from op://Automation/... to op://Private/... across README.md, docs/setup-codex.md, slack/README-slack.md, .env.example, and .github/workflows/snaprestore-dispatch.yml.",
+    "Added a credential-source checklist explaining where to obtain DigitalOcean, Slack, GitHub, Cloudflare, and 1Password credentials.",
+    "Committed and pushed 0482f85 to next-codex for the Private vault alignment."
   ]
 }
