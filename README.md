@@ -68,18 +68,20 @@ npx wrangler --version
 
 ## Standard Secret Names
 
-Use the same secret names everywhere:
+Use the `Private` 1Password vault and the same secret names everywhere:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Signing Secret/credential
-op://Automation/Snaprestore Slack Bot Token/credential
-op://Automation/Snaprestore Slack Allowed User IDs/credential
-op://Automation/Snaprestore GitHub Token/credential
-op://Automation/1Password Service Account Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Signing Secret/credential
+op://Private/Snaprestore Slack Bot Token/credential
+op://Private/Snaprestore Slack Allowed User IDs/credential
+op://Private/Snaprestore GitHub Token/credential
+op://Private/1Password Service Account Token/credential
 ```
 
 Never commit real token values. `.env.example` documents variable names and secret references only.
+
+For token sources and creation steps, follow the credential checklist in [docs/setup-codex.md](docs/setup-codex.md).
 
 ## DigitalOcean Setup
 
@@ -94,7 +96,7 @@ Create or identify:
 Validate local DigitalOcean access:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 ./do-snapshot.sh --no-install --ui plain --dry-run
 SNAPSHOT_ID="list" ./do-restore.sh --no-install --ui plain
 RESERVED_IP="list" ./do-restore.sh --no-install --ui plain
@@ -105,14 +107,14 @@ RESERVED_IP="list" ./do-restore.sh --no-install --ui plain
 Interactive snapshot:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 ./do-snapshot.sh
 ```
 
 Non-interactive snapshot that leaves the Droplet off:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 DROPLET_ID="123456789" \
 SNAPSHOT_NAME="dh-web-$(date +%Y%m%d-%H%M)" \
 POST_ACTION="leave" \
@@ -122,14 +124,14 @@ POST_ACTION="leave" \
 Interactive restore:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 ./do-restore.sh
 ```
 
 Non-interactive restore with reserved IP and welcome-page user data:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 SNAPSHOT_ID="123456789" \
 RESTORE_REGION="nyc3" \
 SSH_KEY_ID="11111111,22222222" \
@@ -171,10 +173,10 @@ See [slack/README-slack.md](slack/README-slack.md) for the detailed Slack setup.
 3. Set Worker secrets from 1Password:
 
    ```bash
-   op read 'op://Automation/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
-   op read 'op://Automation/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
-   op read 'op://Automation/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
-   op read 'op://Automation/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
+   op read 'op://Private/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
+   op read 'op://Private/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
+   op read 'op://Private/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
+   op read 'op://Private/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
    ```
 
 4. Deploy the Worker:
@@ -196,8 +198,8 @@ OP_SERVICE_ACCOUNT_TOKEN
 Create a 1Password service account that can read these items:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Bot Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Bot Token/credential
 ```
 
 Add the service account token to the GitHub repository as `OP_SERVICE_ACCOUNT_TOKEN`. The Cloudflare Worker also needs a GitHub token stored as the Worker secret `GITHUB_TOKEN`; that token must be able to create workflow dispatches and cancel workflow runs for this repository.
@@ -214,7 +216,7 @@ Validate GitHub Actions before using Slack slash commands, but after Slack bot c
 1. Create a Slack app from `slack/app/manifest.yaml`.
 2. Install the app to the workspace.
 3. Store the app signing secret and bot token in 1Password using the standard paths above.
-4. Add comma-separated Slack user IDs to `op://Automation/Snaprestore Slack Allowed User IDs/credential`.
+4. Add comma-separated Slack user IDs to `op://Private/Snaprestore Slack Allowed User IDs/credential`.
 5. Set each slash command request URL to the deployed Cloudflare Worker URL.
 
 Supported commands:

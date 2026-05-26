@@ -68,18 +68,27 @@ npx wrangler --version
 
 ## 3. Create The Standard 1Password Items
 
-Create an `Automation` vault or use the existing vault your team uses for automation secrets.
+Use the `Private` vault for Snaprestore secrets.
 
 Use these exact item paths for consistency across local scripts, GitHub Actions, and Cloudflare Worker deployment:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Signing Secret/credential
-op://Automation/Snaprestore Slack Bot Token/credential
-op://Automation/Snaprestore Slack Allowed User IDs/credential
-op://Automation/Snaprestore GitHub Token/credential
-op://Automation/1Password Service Account Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Signing Secret/credential
+op://Private/Snaprestore Slack Bot Token/credential
+op://Private/Snaprestore Slack Allowed User IDs/credential
+op://Private/Snaprestore GitHub Token/credential
+op://Private/1Password Service Account Token/credential
 ```
+
+Create the items in the 1Password desktop app, web app, or CLI after you obtain the service credentials. The important parts are the vault name, item title, and a field named `credential` because each reference uses `op://Private/<item title>/credential`.
+
+For each item path above:
+
+1. Create an item in the `Private` vault.
+2. Use the item title exactly as shown in the path.
+3. Add a concealed or password field named `credential`.
+4. Paste the matching token, secret, ID list, or service account token into that `credential` field.
 
 The allowed user IDs value is a comma-separated list:
 
@@ -97,12 +106,26 @@ op whoami
 Validate each reference without printing secrets to logs:
 
 ```bash
-op read 'op://Automation/DigitalOcean API Token/credential' >/dev/null
-op read 'op://Automation/Snaprestore Slack Signing Secret/credential' >/dev/null
-op read 'op://Automation/Snaprestore Slack Bot Token/credential' >/dev/null
-op read 'op://Automation/Snaprestore Slack Allowed User IDs/credential' >/dev/null
-op read 'op://Automation/Snaprestore GitHub Token/credential' >/dev/null
+op read 'op://Private/DigitalOcean API Token/credential' >/dev/null
+op read 'op://Private/Snaprestore Slack Signing Secret/credential' >/dev/null
+op read 'op://Private/Snaprestore Slack Bot Token/credential' >/dev/null
+op read 'op://Private/Snaprestore Slack Allowed User IDs/credential' >/dev/null
+op read 'op://Private/Snaprestore GitHub Token/credential' >/dev/null
 ```
+
+## 3a. Obtain Required Tokens And Credentials
+
+Use this checklist before configuring the scripts, Worker, or GitHub Actions:
+
+| Secret | Where to obtain it | Store it in 1Password |
+| --- | --- | --- |
+| DigitalOcean API token | DigitalOcean Control Panel -> API -> Personal access tokens -> Generate New Token. Use custom scopes for Droplets, Snapshots, SSH Keys, Reserved IPs, and VPCs needed by the scripts. | `op://Private/DigitalOcean API Token/credential` |
+| Slack signing secret | Slack app settings -> Basic Information -> App Credentials -> Signing Secret. | `op://Private/Snaprestore Slack Signing Secret/credential` |
+| Slack bot token | Slack app settings -> OAuth & Permissions after installing the app. Use the bot token that starts with `xoxb-`. | `op://Private/Snaprestore Slack Bot Token/credential` |
+| Slack allowed user IDs | In Slack, copy each authorized user's member ID from the profile menu and store a comma-separated list. | `op://Private/Snaprestore Slack Allowed User IDs/credential` |
+| GitHub token for the Worker | GitHub fine-grained personal access token scoped to this repository, with Actions read/write access and metadata read access. | `op://Private/Snaprestore GitHub Token/credential` |
+| 1Password service account token | 1Password service account that can read the `Private` vault items used by GitHub Actions. | `op://Private/1Password Service Account Token/credential` and GitHub repository secret `OP_SERVICE_ACCOUNT_TOKEN` |
+| Cloudflare authentication | Use `npx wrangler login` for local deploys, or a Cloudflare API token if your environment requires non-interactive deployment. | Not consumed by the Snaprestore scripts; store separately if your team uses API-token deployment. |
 
 ## 4. Configure DigitalOcean
 
@@ -117,13 +140,13 @@ Create or identify:
 Store the DigitalOcean API token at:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
+op://Private/DigitalOcean API Token/credential
 ```
 
 Validate local DigitalOcean access through the scripts:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 DROPLET_ID="list" ./do-snapshot.sh --no-install --ui plain
 SNAPSHOT_ID="list" ./do-restore.sh --no-install --ui plain
 SSH_KEY_ID="list" ./do-restore.sh --no-install --ui plain
@@ -211,13 +234,13 @@ OP_SERVICE_ACCOUNT_TOKEN
 Create a 1Password service account that can read:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Bot Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Bot Token/credential
 ```
 
 Store the service account token in both places if you use the standard paths:
 
-1. 1Password item: `op://Automation/1Password Service Account Token/credential`
+1. 1Password item: `op://Private/1Password Service Account Token/credential`
 2. GitHub repository secret: `OP_SERVICE_ACCOUNT_TOKEN`
 
 The workflow loads runtime secrets with `1password/load-secrets-action@v2`, installs `doctl` and `jq`, runs the selected script, and posts updates through `slack/post-update.sh`.
@@ -245,7 +268,7 @@ The token must be able to:
 For a fine-grained personal access token, scope it to this repository only and grant Actions read/write access plus metadata read access. Store it at:
 
 ```text
-op://Automation/Snaprestore GitHub Token/credential
+op://Private/Snaprestore GitHub Token/credential
 ```
 
 ## 9. Configure The Slack App
@@ -265,9 +288,9 @@ The manifest defines:
 After app creation:
 
 1. Install the app to the workspace.
-2. Copy the signing secret into `op://Automation/Snaprestore Slack Signing Secret/credential`.
-3. Copy the bot token into `op://Automation/Snaprestore Slack Bot Token/credential`.
-4. Add authorized Slack user IDs to `op://Automation/Snaprestore Slack Allowed User IDs/credential`.
+2. Copy the signing secret into `op://Private/Snaprestore Slack Signing Secret/credential`.
+3. Copy the bot token into `op://Private/Snaprestore Slack Bot Token/credential`.
+4. Add authorized Slack user IDs to `op://Private/Snaprestore Slack Allowed User IDs/credential`.
 5. Leave slash command request URLs blank until the Cloudflare Worker is deployed, or set them to the Worker URL later.
 
 ## 10. Configure And Deploy The Cloudflare Worker
@@ -297,10 +320,10 @@ npx wrangler login
 Set Worker secrets from 1Password:
 
 ```bash
-op read 'op://Automation/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
-op read 'op://Automation/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
-op read 'op://Automation/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
-op read 'op://Automation/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
+op read 'op://Private/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
+op read 'op://Private/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
+op read 'op://Private/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
+op read 'op://Private/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
 ```
 
 Deploy:
@@ -322,7 +345,7 @@ Copy the deployed Worker URL into each Slack slash command request URL:
 Set shared local auth:
 
 ```bash
-export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
 ```
 
 List available resources:
@@ -491,7 +514,7 @@ brew install --cask 1password-cli
 1Password item not found:
 
 1. Confirm `op signin` succeeded.
-2. Confirm the vault is named `Automation`.
+2. Confirm the vault is named `Private`.
 3. Confirm the item and field names match the standard references.
 
 Worker returns `invalid_signature`:

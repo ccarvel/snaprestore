@@ -60,15 +60,15 @@ Installs nginx on a restored Droplet and writes a simple readiness page. The Git
 
 ## Required Secrets
 
-Use the same secret names everywhere:
+Use the `Private` 1Password vault and the same secret names everywhere:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Signing Secret/credential
-op://Automation/Snaprestore Slack Bot Token/credential
-op://Automation/Snaprestore Slack Allowed User IDs/credential
-op://Automation/Snaprestore GitHub Token/credential
-op://Automation/1Password Service Account Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Signing Secret/credential
+op://Private/Snaprestore Slack Bot Token/credential
+op://Private/Snaprestore Slack Allowed User IDs/credential
+op://Private/Snaprestore GitHub Token/credential
+op://Private/1Password Service Account Token/credential
 ```
 
 Cloudflare Worker secrets:
@@ -89,19 +89,21 @@ OP_SERVICE_ACCOUNT_TOKEN
 GitHub Actions runtime secrets loaded from 1Password:
 
 ```text
-DO_API_TOKEN = op://Automation/DigitalOcean API Token/credential
-SLACK_BOT_TOKEN = op://Automation/Snaprestore Slack Bot Token/credential
+DO_API_TOKEN = op://Private/DigitalOcean API Token/credential
+SLACK_BOT_TOKEN = op://Private/Snaprestore Slack Bot Token/credential
 ```
 
 Never commit real token values. `wrangler.toml` should contain only non-secret variables.
+
+For where each token comes from, follow the credential checklist in [docs/setup-codex.md](../docs/setup-codex.md).
 
 ## Slack App Setup
 
 1. Create a Slack app from `slack/app/manifest.yaml`.
 2. Install the app to the workspace.
-3. Copy the app signing secret into `op://Automation/Snaprestore Slack Signing Secret/credential`.
-4. Copy the bot token into `op://Automation/Snaprestore Slack Bot Token/credential`.
-5. Add comma-separated Slack user IDs to `op://Automation/Snaprestore Slack Allowed User IDs/credential`.
+3. Copy the app signing secret into `op://Private/Snaprestore Slack Signing Secret/credential`.
+4. Copy the bot token into `op://Private/Snaprestore Slack Bot Token/credential`.
+5. Add comma-separated Slack user IDs to `op://Private/Snaprestore Slack Allowed User IDs/credential`.
 6. Set each slash command request URL to the deployed Cloudflare Worker URL after deployment.
 
 The manifest includes these bot scopes:
@@ -137,8 +139,8 @@ OP_SERVICE_ACCOUNT_TOKEN
 Create a 1Password service account that can read:
 
 ```text
-op://Automation/DigitalOcean API Token/credential
-op://Automation/Snaprestore Slack Bot Token/credential
+op://Private/DigitalOcean API Token/credential
+op://Private/Snaprestore Slack Bot Token/credential
 ```
 
 Create a GitHub token for the Cloudflare Worker. The token must be able to:
@@ -150,7 +152,7 @@ Create a GitHub token for the Cloudflare Worker. The token must be able to:
 For a fine-grained personal access token, scope it to this repository only and grant Actions read/write access plus metadata read access. Store it at:
 
 ```text
-op://Automation/Snaprestore GitHub Token/credential
+op://Private/Snaprestore GitHub Token/credential
 ```
 
 ## Cloudflare Worker Setup
@@ -178,10 +180,10 @@ cat wrangler.toml
 Set Worker secrets from 1Password:
 
 ```bash
-op read 'op://Automation/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
-op read 'op://Automation/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
-op read 'op://Automation/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
-op read 'op://Automation/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
+op read 'op://Private/Snaprestore Slack Signing Secret/credential' | npx wrangler secret put SLACK_SIGNING_SECRET
+op read 'op://Private/Snaprestore Slack Bot Token/credential' | npx wrangler secret put SLACK_BOT_TOKEN
+op read 'op://Private/Snaprestore Slack Allowed User IDs/credential' | npx wrangler secret put SLACK_ALLOWED_USER_IDS
+op read 'op://Private/Snaprestore GitHub Token/credential' | npx wrangler secret put GITHUB_TOKEN
 ```
 
 Deploy:
@@ -291,7 +293,7 @@ Run these tests in order:
 1. Validate the local scripts outside Slack:
 
    ```bash
-   export OP_DO_TOKEN_REF='op://Automation/DigitalOcean API Token/credential'
+   export OP_DO_TOKEN_REF='op://Private/DigitalOcean API Token/credential'
    DROPLET_ID="list" ./do-snapshot.sh --no-install --ui plain
    SNAPSHOT_ID="list" ./do-restore.sh --no-install --ui plain
    ```
@@ -340,7 +342,7 @@ GitHub dispatch fails:
 GitHub workflow fails while posting Slack updates:
 
 1. Confirm `OP_SERVICE_ACCOUNT_TOKEN` exists as a GitHub repository secret.
-2. Confirm the 1Password service account can read `op://Automation/Snaprestore Slack Bot Token/credential`.
+2. Confirm the 1Password service account can read `op://Private/Snaprestore Slack Bot Token/credential`.
 3. Confirm the workflow received a real `slack_channel_id` and `slack_thread_ts`.
 
 Restore succeeds but Slack never posts `ready`:

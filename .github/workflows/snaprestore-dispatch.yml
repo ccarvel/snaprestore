@@ -75,8 +75,8 @@ jobs:
     timeout-minutes: 45
     env:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-      DO_API_TOKEN: op://Automation/DigitalOcean API Token/credential
-      SLACK_BOT_TOKEN: op://Automation/Snaprestore Slack Bot Token/credential
+      DO_API_TOKEN: op://Private/DigitalOcean API Token/credential
+      SLACK_BOT_TOKEN: op://Private/Snaprestore Slack Bot Token/credential
       INPUT_SLACK_CHANNEL_ID: ${{ inputs.slack_channel_id }}
       INPUT_SLACK_THREAD_TS: ${{ inputs.slack_thread_ts }}
       SNAPRESTORE_YES: "1"
@@ -97,8 +97,8 @@ jobs:
         with:
           export-env: true
         env:
-          DO_API_TOKEN: op://Automation/DigitalOcean API Token/credential
-          SLACK_BOT_TOKEN: op://Automation/Snaprestore Slack Bot Token/credential
+          DO_API_TOKEN: op://Private/DigitalOcean API Token/credential
+          SLACK_BOT_TOKEN: op://Private/Snaprestore Slack Bot Token/credential
 
       - name: Install dependencies
         run: |
