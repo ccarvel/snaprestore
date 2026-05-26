@@ -76,6 +76,11 @@ ui_choose() {
   shift
   local options=("$@")
   
+  if [ "${NON_INTERACTIVE:-0}" -eq 1 ]; then
+    ui_error "Interactive menu '$prompt' skipped in non-interactive mode. Provide required variables via environment."
+    exit 1
+  fi
+  
   if [ "$USE_GUM" -eq 1 ]; then
     echo -e "${C_INFO}?${C_RESET} $prompt"
     local selected
@@ -119,6 +124,7 @@ ui_choose() {
 }
 
 ui_confirm() {
+  if [ "${NON_INTERACTIVE:-0}" -eq 1 ]; then return 0; fi
   local prompt="$1"
   if [ "$USE_GUM" -eq 1 ]; then
     gum confirm "$prompt"
@@ -138,6 +144,12 @@ ui_input() {
   local prompt="$1"
   local default="$2"
   local res
+  
+  if [ "${NON_INTERACTIVE:-0}" -eq 1 ]; then
+    echo "$default"
+    return 0
+  fi
+  
   if [ "$USE_GUM" -eq 1 ]; then
     res=$(gum input --prompt="? $prompt " --placeholder="$default")
   else
@@ -150,6 +162,12 @@ ui_input() {
 ui_input_secret() {
   local prompt="$1"
   local res
+  
+  if [ "${NON_INTERACTIVE:-0}" -eq 1 ]; then
+    ui_error "Secret input required but running non-interactively."
+    exit 1
+  fi
+  
   if [ "$USE_GUM" -eq 1 ]; then
     res=$(gum input --password --prompt="? $prompt ")
     echo "$res"
@@ -179,10 +197,18 @@ log_action() {
   echo "$(date +'%Y-%m-%d %H:%M:%S') - $msg" >> "$LOG_FILE"
 }
 
-if [[ "$1" == "--dry-run" ]]; then
-  DRY_RUN=1
-  ui_warn "DRY RUN MODE ENABLED. No mutating DO API calls will be executed."
-fi
+NON_INTERACTIVE=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run)
+      DRY_RUN=1
+      ui_warn "DRY RUN MODE ENABLED. No mutating DO API calls will be executed."
+      ;;
+    --force|-y)
+      NON_INTERACTIVE=1
+      ;;
+  esac
+done
 
 if ! command -v doctl >/dev/null 2>&1; then
   ui_error "doctl is required but not installed."
@@ -350,8 +376,15 @@ else
 fi
 
 POST_OPTIONS=("start|Start it back up" "leave|Leave it shut down" "delete|Delete/destroy it")
-SELECTED=$(ui_choose "What would you like to do with the droplet?" "${POST_OPTIONS[@]}")
-POST_ACTION=$(echo "$SELECTED" | cut -d'|' -f1)
+if [ "${NON_INTERACTIVE:-0}" -eq 1 ]; then
+  # Default to leaving it shut down if automated, or start it if we assume a standard backup.
+  # Safer to leave shut down in automated scenarios, or start it back up?
+  # The original script would hang. Let's default to start it back up to minimize downtime.
+  POST_ACTION="start"
+else
+  SELECTED=$(ui_choose "What would you like to do with the droplet?" "${POST_OPTIONS[@]}")
+  POST_ACTION=$(echo "$SELECTED" | cut -d'|' -f1)
+fi
 
 case "$POST_ACTION" in
   start)
