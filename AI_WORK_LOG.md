@@ -3,6 +3,41 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-26 — Session 3 (Claude Code — next-cc)
+
+**Focus:** No new work — consecutive `/relay-handoff` invocation immediately following session 2. Session boundary marker only.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `ai_status.json` | Updated session number, git_sha, focus, completed_this_session | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 3 entry | this handoff |
+
+### Commands run
+
+```bash
+git status --short
+git log -n 5 --oneline
+git branch --show-current
+```
+
+### Validations
+
+- `./do-snapshot.sh --dry-run`: not run
+- `./do-restore.sh --dry-run`: not run
+- Live DO API reads or writes: not run
+- Slack bot local test (`./start.sh`): not run
+
+### Outcome
+
+No code or documentation changes this session. This entry records the session boundary only. All substantive work (docs/setup-cc.md, slack-bot/README-slack-bot.md, README.md) was completed and pushed in session 2 as commits `e0206c5` and `fe5ec0c`. Branch is clean and fully up to date with `origin/next-cc`.
+
+### Next step
+
+Run `./do-snapshot.sh --dry-run` to validate the full script flow against the `default` doctl context — confirms token loading, droplet fetch, fzf/ANSI selector, and dry-run path all work before any live API writes.
+
+---
 ## 2026-05-26 — Session 2 (Claude Code — next-cc)
 
 **Focus:** Comprehensive setup documentation — complete rewrite of `docs/setup-cc.md`, new `slack-bot/README-slack-bot.md`, `README.md` updates.

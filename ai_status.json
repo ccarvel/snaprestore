@@ -1,9 +1,9 @@
 {
   "last_updated": "2026-05-26",
-  "last_session": "session 2 — Claude Code (next-cc)",
-  "git_sha": "e0206c5",
+  "last_session": "session 3 — Claude Code (next-cc)",
+  "git_sha": "fe5ec0c",
   "worktree_state": "clean (only .omx/ untracked — not a project file)",
-  "current_focus": "Comprehensive setup documentation for next-cc: full docs/setup-cc.md rewrite (7-part guide), new slack-bot/README-slack-bot.md (file breakdown + identical setup language), README.md additions. All docs committed and pushed.",
+  "current_focus": "No new work this session — consecutive handoff invocation. All docs from session 2 are committed and pushed (fe5ec0c). Ready for operator to begin live script testing.",
   "exact_next_step": "Run `./do-snapshot.sh --dry-run` to validate the full script flow against the default doctl context — confirms token loading, droplet fetch, fzf/ANSI selector, and dry-run path all work before any live API writes.",
   "blockers": [
     {
@@ -21,10 +21,6 @@
     "Live-test the Slack bot locally (./start.sh) once 1Password vault items are populated."
   ],
   "completed_this_session": [
-    "Switched to next-cc branch for full session.",
-    "Completely rewrote docs/setup-cc.md: replaced minimal branch-notes stub with a 7-part setup guide covering DO token creation (scope tables for each script + bot), doctl context init, 1Password CLI + vault items for all .env.example variables, service account creation, environment file setup, dry-run and full test walkthroughs, controller droplet creation (cloud-init steps), and Slack app setup (channel, manifest import, Socket Mode xapp token, xoxb token, signing secret, allow-list, 1Password item creation).",
-    "Created slack-bot/README-slack-bot.md: file-by-file breakdown of every item in slack-bot/ (including bot.py internals, pyproject.toml, manifest.yml, .env.op.example, start.sh, systemd unit, cloud-init), architecture notes (Socket Mode, service account secret model, async job pattern, allow-list), setup section reusing identical language from docs/setup-cc.md Parts 6 and 7, local dev and service management sections, variables reference table.",
-    "Updated README.md: added 'Full setup guide' link pointing to docs/setup-cc.md near the top, added 'Full Slack bot documentation' link in the Slack Bot section pointing to slack-bot/README-slack-bot.md, updated file structure listing to include both new docs files.",
-    "Committed all changes as e0206c5 and pushed to origin/next-cc."
+    "No code or doc changes — consecutive /relay-handoff invocation immediately after session 2. Session 3 is a boundary marker only."
   ]
 }
