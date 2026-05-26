@@ -76,7 +76,9 @@ Used by `do-restore.sh` and `do-snapshot.sh` via the doctl context. This token n
 ---
 
 **Token 2 — Slack bot (`snaprestore-bot`):**
-Used by the Slack bot service. Create a second token with the same scope table above plus any additional scopes the bot needs.
+Used by the Slack bot service. The bot makes the same DO API calls as the scripts (list droplets, take snapshots, create droplets from snapshots), so it needs the same scopes. Create a second token with **the same scope table above** — no additional scopes required.
+
+The bot does **not** use reserved IPs or SSH key lookups, so `reserved_ip:read`, `reserved_ip:update`, and `ssh_key:read` are technically unnecessary for it — but including them keeps both tokens symmetric and makes future features easier.
 
 ---
 
