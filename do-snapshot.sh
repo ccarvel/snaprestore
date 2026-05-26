@@ -46,9 +46,11 @@ done
 
 # ── logging ───────────────────────────────────────────────────────────────────
 
+_TEE_PID=""
 if [[ -n "$LOG_FILE" ]]; then
   mkdir -p "$(dirname "$LOG_FILE")"
   exec > >(tee -a "$LOG_FILE") 2>&1
+  _TEE_PID=$!
 fi
 
 # ── bootstrap + UI layer ──────────────────────────────────────────────────────
@@ -67,12 +69,16 @@ CREATED_RESOURCE=""
 
 cleanup() {
   local code=$?
-  ui_spinner_stop  # clears spinner line and restores cursor
+  ui_spinner_stop  # kills spinner → closes its copy of the pipe write-end
   if [[ $code -ne 0 && -n "$CURRENT_OP" ]]; then
     echo "" >&2
     ui_warn "Interrupted during: $CURRENT_OP"
     [[ -n "$CREATED_RESOURCE" ]] && ui_warn "Resource may be in unknown state: $CREATED_RESOURCE"
     ui_warn "Check console: https://cloud.digitalocean.com/droplets"
+  fi
+  if [[ -n "$_TEE_PID" ]]; then
+    exec 1>&- 2>&-
+    wait "$_TEE_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
