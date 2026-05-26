@@ -1,13 +1,13 @@
 {
   "last_updated": "2026-05-26",
-  "last_session": "session 1 — Claude Code (next-cc)",
-  "git_sha": "d9f298b",
+  "last_session": "session 2 — Claude Code (next-cc)",
+  "git_sha": "e0206c5",
   "worktree_state": "clean (only .omx/ untracked — not a project file)",
-  "current_focus": "Housekeeping on next-cc: canonical file renames, .env.example with op:// examples, README setup step 4, new-user setup doc, chmod +x, DOCTL_CONTEXT wired to default context.",
+  "current_focus": "Comprehensive setup documentation for next-cc: full docs/setup-cc.md rewrite (7-part guide), new slack-bot/README-slack-bot.md (file breakdown + identical setup language), README.md additions. All docs committed and pushed.",
   "exact_next_step": "Run `./do-snapshot.sh --dry-run` to validate the full script flow against the default doctl context — confirms token loading, droplet fetch, fzf/ANSI selector, and dry-run path all work before any live API writes.",
   "blockers": [
     {
-      "description": "Scripts not live-tested this session — --dry-run was not executed, no live DO API reads or writes were performed.",
+      "description": "Scripts not live-tested across either session — --dry-run has not been executed, no live DO API reads or writes have been performed.",
       "severity": "medium",
       "owner": "operator"
     }
@@ -16,19 +16,15 @@
     "Run ./do-snapshot.sh --dry-run and ./do-restore.sh --dry-run to confirm token loading + UI flow with default doctl context.",
     "Decide whether DOCTL_CONTEXT=\"default\" stays hardcoded in the script config blocks or reverts to empty with operator expected to set it via env.",
     "Install gum (bootstrap will prompt) and verify rich UI mode activates correctly.",
-    "Add SNAPSHOT_ID=list dispatch to do-snapshot.sh — user asked whether snapshot listing was available from that script; currently only do-restore.sh supports it.",
-    "Live-test a full snapshot + restore cycle on a disposable droplet before merging next-cc to main."
+    "Add SNAPSHOT_ID=list dispatch to do-snapshot.sh — currently only do-restore.sh supports snapshot listing.",
+    "Live-test a full snapshot + restore cycle on a disposable droplet before merging next-cc to main.",
+    "Live-test the Slack bot locally (./start.sh) once 1Password vault items are populated."
   ],
   "completed_this_session": [
-    "Switched to and stayed on next-cc branch for full session.",
-    "Renamed README_md.md → README.md, do-snapshot_sh.sh → do-snapshot.sh, do-restore_sh.sh → do-restore.sh via git mv (history preserved).",
-    "Deleted phase-1-cc.md and phase-2-cc.md.",
-    "Created .env.example: all variables for do-snapshot.sh, do-restore.sh, and slack-bot with commented op:// example values, organized into four sections.",
-    "Updated .gitignore: added !.env.example to exempt the template from the .env.* ignore rule.",
-    "Updated README.md: added setup step 4 (environment file), updated op run example to reference .env.example, expanded file structure tree to show full repo layout.",
-    "Set DOCTL_CONTEXT=\"default\" in both script config blocks so scripts run against the existing doctl context without prompting.",
-    "Applied chmod +x to do-snapshot.sh and do-restore.sh.",
-    "Created docs/setup-cc.md: new-user setup guide documenting prerequisites, what was pre-configured, dry-run test commands, and dedicated context setup.",
-    "Committed all changes as d9f298b and pushed to origin/next-cc."
+    "Switched to next-cc branch for full session.",
+    "Completely rewrote docs/setup-cc.md: replaced minimal branch-notes stub with a 7-part setup guide covering DO token creation (scope tables for each script + bot), doctl context init, 1Password CLI + vault items for all .env.example variables, service account creation, environment file setup, dry-run and full test walkthroughs, controller droplet creation (cloud-init steps), and Slack app setup (channel, manifest import, Socket Mode xapp token, xoxb token, signing secret, allow-list, 1Password item creation).",
+    "Created slack-bot/README-slack-bot.md: file-by-file breakdown of every item in slack-bot/ (including bot.py internals, pyproject.toml, manifest.yml, .env.op.example, start.sh, systemd unit, cloud-init), architecture notes (Socket Mode, service account secret model, async job pattern, allow-list), setup section reusing identical language from docs/setup-cc.md Parts 6 and 7, local dev and service management sections, variables reference table.",
+    "Updated README.md: added 'Full setup guide' link pointing to docs/setup-cc.md near the top, added 'Full Slack bot documentation' link in the Slack Bot section pointing to slack-bot/README-slack-bot.md, updated file structure listing to include both new docs files.",
+    "Committed all changes as e0206c5 and pushed to origin/next-cc."
   ]
 }

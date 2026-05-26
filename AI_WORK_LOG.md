@@ -3,6 +3,49 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-26 — Session 2 (Claude Code — next-cc)
+
+**Focus:** Comprehensive setup documentation — complete rewrite of `docs/setup-cc.md`, new `slack-bot/README-slack-bot.md`, `README.md` updates.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `docs/setup-cc.md` | Completely rewritten — 7-part setup guide (DO tokens, doctl, 1Password, env file, script testing, controller droplet, Slack app) | `e0206c5` |
+| `slack-bot/README-slack-bot.md` | Created — file-by-file breakdown, architecture notes, setup with identical language to setup-cc.md Parts 6 & 7 | `e0206c5` |
+| `README.md` | Added setup guide link at top, Slack bot README link in Slack Bot section, updated file structure listing | `e0206c5` |
+
+### Commands run
+
+```bash
+git checkout next-cc
+git status --short
+git log -n 5 --oneline
+# (file reads: docs/setup-cc.md, README.md, .env.example, slack-bot/* — all files)
+git add README.md docs/setup-cc.md slack-bot/README-slack-bot.md
+git commit -m "Add comprehensive setup docs and slack-bot README"
+git push origin next-cc
+```
+
+### Validations
+
+- Commit `e0206c5` pushed to `origin/next-cc`: pass
+- All `op://` paths in new docs match `.env.example` and `.env.op.example` defaults: pass (verified by cross-reading files)
+- Identical language in setup-cc.md Parts 6 & 7 vs README-slack-bot.md setup sections: pass (written from same source)
+- `./do-snapshot.sh --dry-run`: not run
+- `./do-restore.sh --dry-run`: not run
+- Live DO API reads or writes: not run
+- Slack bot local test (`./start.sh`): not run
+
+### Outcome
+
+`docs/setup-cc.md` is now a complete, standalone setup guide for new users — covering every step from DO token creation through live script testing and Slack bot deployment. `slack-bot/README-slack-bot.md` is a new file that explains every item in the `slack-bot/` directory and reuses identical step-by-step language from `setup-cc.md` for the controller droplet and Slack app sections. `README.md` now links to both new docs files and has an accurate file structure listing. Branch is clean and pushed. Scripts remain untested at the CLI level.
+
+### Next step
+
+Run `./do-snapshot.sh --dry-run` to validate the full script flow against the `default` doctl context — confirms token loading, droplet fetch, fzf/ANSI selector, and dry-run path all work before any live API writes.
+
+---
 ## 2026-05-26 — Session 1 (Claude Code — next-cc)
 
 **Focus:** Canonical file renames, `.env.example`, README hardening, new-user setup doc on `next-cc`.
