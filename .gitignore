@@ -1,3 +1,12 @@
+# secrets — never commit live op:// references or resolved tokens
+slack-bot/.env.op
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+
 # macOS
 .DS_Store
 .AppleDouble
@@ -15,34 +24,31 @@
 *.swo
 *~
 
-# Logs & temp files
-*.log
-*.tmp
-*.bak
-*.orig
-
-# Environment & secrets
-.env
-.env.*
-*.pem
-*.key
-*.p12
-secrets/
-
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 .venv/
 venv/
+*.egg-info/
 dist/
 build/
-*.egg-info/
+.uv/
 
 # Node
 node_modules/
 npm-debug.log*
 yarn-error.log*
+
+# Logs & temp files
+*.log
+*.tmp
+*.bak
+*.orig
+
+# logs and runtime state
+~/.local/share/do-snap-tool/
+~/.config/do-snap-tool/
 
 # Archives & binaries
 *.zip
