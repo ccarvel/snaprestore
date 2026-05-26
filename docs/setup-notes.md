@@ -49,25 +49,30 @@ If you need IT to configure the service account access, use this draft:
 
 ---
 
-**Subject:** 1Password service account — vault access needed
+**Subject:** 1Password — new vaults and service account needed
 
 Hi [Name],
 
-I'm working on an internal tool that uses a 1Password service account to
-inject secrets into a server process at runtime (no secrets are stored on
-disk or in code). I need your help with two things in our Brown University
+I'm working on some internal tooling that uses a 1Password service account to
+inject secrets into server processes at runtime (no secrets are stored on disk
+or in code). I need your help with three things in our Brown University
 1Password account:
 
-1. **Create a new vault** named `snaprestore` (or confirm I can use an
-   existing one like `CDS_Vault`).
+1. **Create two new vaults** named `dev` and `prod` — for storing secrets
+   used by development and production environments respectively. I'll add items
+   to each as needed for various projects going forward.
 
 2. **Create a service account** named `do-snap-bot-controller` and grant it
-   **read-only** access to that vault. Generate the `ops_…` service account
-   token and share it with me securely (1Password or similar).
+   **read-only** access to both the `dev` and `prod` vaults. Generate the
+   `ops_…` service account token and share it with me securely (via 1Password
+   or another secure channel).
 
-The secrets I'll store in the vault are: Slack bot tokens, a Slack signing
-secret, and a DigitalOcean API token — all for an internal snapshot/restore
-automation tool running on a DigitalOcean droplet.
+3. **Grant my personal account** read/write access to both vaults so I can
+   add and manage items in them.
+
+The immediate use case is a Slack bot that automates DigitalOcean droplet
+snapshots and restores. The secrets involved are: Slack bot tokens, a Slack
+signing secret, and a DigitalOcean API token.
 
 Let me know if you need any additional context or if there's a self-service
 process I missed.
