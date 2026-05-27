@@ -25,6 +25,9 @@ ALLOWED_USERS: frozenset[str] = frozenset(
     if u.strip()
 )
 
+# Keyed by conf_id; each entry: {"event": asyncio.Event, "value": str | None}
+PENDING_CONFIRMATIONS: dict[str, dict] = {}
+
 # ── app init ──────────────────────────────────────────────────────────────────
 
 app = AsyncApp(
@@ -197,6 +200,74 @@ async def get_droplet(droplet_id: str) -> dict | None:
     return data[0] if data else None
 
 
+# ── confirmation helpers ──────────────────────────────────────────────────────
+
+async def _ask_confirmation(
+    client,
+    channel: str,
+    thread_ts: str,
+    conf_id: str,
+    question: str,
+    yes_text: str,
+    no_text: str,
+    yes_action: str,
+    no_action: str,
+    timeout: int = 120,
+) -> str | None:
+    """Post Block Kit buttons and wait for user response.
+
+    Returns 'yes', 'no', or None on timeout.
+    """
+    event = asyncio.Event()
+    PENDING_CONFIRMATIONS[conf_id] = {"event": event, "value": None}
+
+    await client.chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": question},
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": yes_text},
+                        "style": "primary",
+                        "action_id": yes_action,
+                        "value": conf_id,
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": no_text},
+                        "action_id": no_action,
+                        "value": conf_id,
+                    },
+                ],
+            },
+        ],
+        text=question,
+    )
+
+    try:
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+        return PENDING_CONFIRMATIONS.pop(conf_id, {}).get("value")
+    except asyncio.TimeoutError:
+        PENDING_CONFIRMATIONS.pop(conf_id, None)
+        return None
+
+
+def _resolve_confirmation(body: dict, value: str) -> None:
+    """Called from action handlers to resolve a pending confirmation."""
+    conf_id = body["actions"][0]["value"]
+    entry = PENDING_CONFIRMATIONS.get(conf_id)
+    if entry:
+        entry["value"] = value
+        entry["event"].set()
+
+
 # ── /do-snapshot ──────────────────────────────────────────────────────────────
 
 @app.command("/do-snapshot")
@@ -220,6 +291,66 @@ async def cmd_snapshot(ack, body, client, say):
     asyncio.create_task(
         _snapshot_job(job_id, user_id, body.get("text", "").strip(),
                       client, channel, thread_ts)
+    )
+
+
+@app.action("snapshot_shutdown_yes")
+async def action_shutdown_yes(ack, body, client):
+    await ack()
+    _resolve_confirmation(body, "yes")
+    await client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        blocks=[{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "✅ *Shutting down before snapshot.*"},
+        }],
+        text="Shutting down before snapshot.",
+    )
+
+
+@app.action("snapshot_shutdown_no")
+async def action_shutdown_no(ack, body, client):
+    await ack()
+    _resolve_confirmation(body, "no")
+    await client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        blocks=[{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "⏭️ *Skipping shutdown — snapshotting live droplet.*"},
+        }],
+        text="Skipping shutdown — snapshotting live droplet.",
+    )
+
+
+@app.action("snapshot_restart_yes")
+async def action_restart_yes(ack, body, client):
+    await ack()
+    _resolve_confirmation(body, "yes")
+    await client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        blocks=[{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "▶️ *Restarting droplet…*"},
+        }],
+        text="Restarting droplet…",
+    )
+
+
+@app.action("snapshot_restart_no")
+async def action_restart_no(ack, body, client):
+    await ack()
+    _resolve_confirmation(body, "no")
+    await client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        blocks=[{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "💤 *Droplet left off.* Use `/do-restore` to bring it back."},
+        }],
+        text="Droplet left off.",
     )
 
 
@@ -273,35 +404,60 @@ async def _snapshot_job(
                   f"*Snapshot name:* `{snap_name}`"),
         )
 
-        # shut down if active
+        # ask whether to shut down (only matters if droplet is active)
+        shut_down = False
         if status == "active":
-            await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                           text="⏸ Shutting down droplet…")
-            rc, _, err = await run_doctl_long(
-                job_id, client, channel, thread_ts, "Shutting down",
-                "compute", "droplet-action", "shutdown", droplet_id, "--wait",
+            choice = await _ask_confirmation(
+                client, channel, thread_ts,
+                conf_id=f"{job_id}-shutdown",
+                question=("*Shut down droplet before snapshotting?*\n"
+                          "Recommended for a consistent snapshot. "
+                          "Skip to snapshot the live (running) droplet."),
+                yes_text="Shut down",
+                no_text="Skip shutdown",
+                yes_action="snapshot_shutdown_yes",
+                no_action="snapshot_shutdown_no",
+                timeout=120,
             )
-            if rc == -2:
-                await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                               text="🛑 Job cancelled.")
-                return
-            if rc != 0:
-                await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                               text=f"⚠️ Graceful shutdown failed — trying power-off…\n```{err[:300]}```")
-                rc2, _, err2 = await run_doctl_long(
-                    job_id, client, channel, thread_ts, "Powering off",
-                    "compute", "droplet-action", "power-off", droplet_id, "--wait",
+
+            if choice is None:
+                await client.chat_postMessage(
+                    channel=channel, thread_ts=thread_ts,
+                    text="⏱️ No response in 2 min — snapshotting live droplet.",
                 )
-                if rc2 == -2:
+            elif choice == "yes":
+                await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                               text="⏸ Shutting down droplet…")
+                rc, _, err = await run_doctl_long(
+                    job_id, client, channel, thread_ts, "Shutting down",
+                    "compute", "droplet-action", "shutdown", droplet_id, "--wait",
+                )
+                if rc == -2:
                     await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                                    text="🛑 Job cancelled.")
                     return
-                if rc2 != 0:
-                    await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                                   text=f"❌ Power-off failed.\n```{err2[:300]}```")
-                    return
-            await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                           text="✅ Droplet stopped.")
+                if rc != 0:
+                    await client.chat_postMessage(
+                        channel=channel, thread_ts=thread_ts,
+                        text=f"⚠️ Graceful shutdown failed — trying power-off…\n```{err[:300]}```",
+                    )
+                    rc2, _, err2 = await run_doctl_long(
+                        job_id, client, channel, thread_ts, "Powering off",
+                        "compute", "droplet-action", "power-off", droplet_id, "--wait",
+                    )
+                    if rc2 == -2:
+                        await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                                       text="🛑 Job cancelled.")
+                        return
+                    if rc2 != 0:
+                        await client.chat_postMessage(
+                            channel=channel, thread_ts=thread_ts,
+                            text=f"❌ Power-off failed.\n```{err2[:300]}```",
+                        )
+                        return
+                await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                               text="✅ Droplet stopped.")
+                shut_down = True
 
         if _is_cancelled(job_id):
             await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
@@ -350,9 +506,53 @@ async def _snapshot_job(
             channel=channel, thread_ts=thread_ts,
             text=(f"✅ *Snapshot complete!* ({m:02d}:{s:02d})\n"
                   f"*ID:* `{snap_id}`  *Name:* `{snap_name}`\n"
-                  f"*Size:* {snap_size} GB  *Est. cost:* {cost_est}/mo\n\n"
-                  f"Droplet is still *off*. Use `/do-restore` to bring it back."),
+                  f"*Size:* {snap_size} GB  *Est. cost:* {cost_est}/mo"),
         )
+
+        # offer restart if we shut the droplet down
+        if shut_down:
+            restart_choice = await _ask_confirmation(
+                client, channel, thread_ts,
+                conf_id=f"{job_id}-restart",
+                question="*Restart droplet now?*",
+                yes_text="Restart",
+                no_text="Leave off",
+                yes_action="snapshot_restart_yes",
+                no_action="snapshot_restart_no",
+                timeout=120,
+            )
+
+            if restart_choice == "yes":
+                rc_on, _, err_on = await run_doctl(
+                    "compute", "droplet-action", "power-on", droplet_id, "--wait",
+                )
+                if rc_on == 0:
+                    await client.chat_postMessage(
+                        channel=channel, thread_ts=thread_ts,
+                        text="🟢 Droplet is back online.",
+                    )
+                else:
+                    await client.chat_postMessage(
+                        channel=channel, thread_ts=thread_ts,
+                        text=f"⚠️ Power-on failed.\n```{err_on[:300]}```",
+                    )
+            elif restart_choice is None:
+                await client.chat_postMessage(
+                    channel=channel, thread_ts=thread_ts,
+                    text="⏱️ No response — droplet left off. Use `/do-restore` to bring it back.",
+                )
+            # "no" case: button handler already updated its own message; nothing extra needed
+        else:
+            if status == "active":
+                await client.chat_postMessage(
+                    channel=channel, thread_ts=thread_ts,
+                    text="ℹ️ Droplet is still running (snapshot taken live).",
+                )
+            else:
+                await client.chat_postMessage(
+                    channel=channel, thread_ts=thread_ts,
+                    text="💤 Droplet was already off. Use `/do-restore` to bring it back.",
+                )
 
     except Exception as exc:
         await client.chat_postMessage(
@@ -453,16 +653,30 @@ async def _restore_job(
 
         size_slug = "s-1vcpu-1gb"  # minimal; user can override via hint
 
-        create_start = time.monotonic()
-        rc, out, err = await run_doctl_long(
-            job_id, client, channel, thread_ts, "Creating droplet",
-            "compute", "droplet", "create", droplet_name,
-            "--image", snap_id,
-            "--size", size_slug,
-            "--region", region,
-            "--wait",
-            "--output", "json",
+        # write welcome cloud-init to a temp file; IP not known yet so it's fetched
+        # at boot time from the DO metadata API inside the cloud-init runcmd
+        cloud_init_yaml = build_welcome_cloud_init(
+            droplet_name=droplet_name,
+            restore_ts=restore_ts,
+            connect_ip="(see Slack)",
         )
+        cloud_init_tmp = Path(tempfile.mktemp(suffix=".yml"))
+        cloud_init_tmp.write_text(cloud_init_yaml)
+
+        create_start = time.monotonic()
+        try:
+            rc, out, err = await run_doctl_long(
+                job_id, client, channel, thread_ts, "Creating droplet",
+                "compute", "droplet", "create", droplet_name,
+                "--image", snap_id,
+                "--size", size_slug,
+                "--region", region,
+                "--user-data-file", str(cloud_init_tmp),
+                "--wait",
+                "--output", "json",
+            )
+        finally:
+            cloud_init_tmp.unlink(missing_ok=True)
         if rc == -2:
             await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                            text="🛑 Job cancelled.")
@@ -502,13 +716,14 @@ async def _restore_job(
             if ok:
                 await client.chat_postMessage(
                     channel=channel, thread_ts=thread_ts,
-                    text=f"🟢 HTTP health check passed — `ssh root@{live_ip}`",
+                    text=(f"🟢 Droplet is up — http://{live_ip} (nginx welcome page)\n"
+                          f"`ssh root@{live_ip}`"),
                 )
             else:
                 await client.chat_postMessage(
                     channel=channel, thread_ts=thread_ts,
-                    text=(f"⚠️ Health check timed out after 5 min. "
-                          f"Droplet may still be booting — `ssh root@{live_ip}`"),
+                    text=(f"⚠️ Health check timed out after 5 min — nginx may still be installing.\n"
+                          f"Try http://{live_ip} in a moment — `ssh root@{live_ip}`"),
                 )
 
     except Exception as exc:
