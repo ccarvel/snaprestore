@@ -20,8 +20,8 @@ Two bash scripts and an optional Slack bot for managing DigitalOcean droplet sna
 | Component | Purpose |
 |-----------|---------|
 | `do-snapshot.sh` | Snapshot a droplet; interactive shutdown confirmation; start/leave/delete after |
-| `do-restore.sh` | Create a new droplet from a snapshot; reassign a reserved IP |
-| `slack-bot/` | Slack slash commands to trigger snapshot and restore without SSH; interactive Block Kit confirmations; nginx welcome page on restore |
+| `do-restore.sh` | Create a new droplet from a snapshot; reassign a reserved IP; optional auto-destroy timer |
+| `slack-bot/` | Full set of Slack slash commands for snapshot, restore, droplet management, and help; interactive Block Kit dropdowns; nginx welcome page on restore |
 
 ## Documentation
 
@@ -63,17 +63,40 @@ brew install doctl jq 1password-cli fzf gum && curl -LsSf https://astral.sh/uv/i
 ```bash
 ./do-snapshot.sh --log snapshot.log
 ./do-restore.sh --log restore.log
+./do-restore.sh --auto-destroy 2h   # destroy the restored droplet automatically after 2 hours
 ```
 
 **Slack bot** (once deployed):
 
 ```
-/do-snapshot               → interactive: choose shutdown, then snapshot
-/do-restore <snap-id>      → restore a snapshot; nginx welcome page installs on the new droplet
-/do-deploy-cancel <job-id> → cancel a running job
+/do-help                              → list all available commands
+
+Snapshots
+  /do-snapshot                        → interactive: shut down droplet, snapshot, restart or delete
+  /do-snapshot-list                   → list all snapshots with size and age
+  /do-snapshot-delete [id-or-name]    → delete a snapshot (dropdown picker)
+
+Restore & create
+  /do-restore [snapshot-id-or-name]   → create a droplet from a snapshot (dropdown picker)
+  /do-droplet-create <name> [size] [image]  → create a new droplet from a snapshot or base image
+
+Droplet management
+  /do-droplet-list                    → list all droplets with status, size, region, and IP
+  /do-droplet-power-on  <name-or-id>  → power on a stopped droplet
+  /do-droplet-power-off <name-or-id>  → graceful shutdown (with confirmation)
+  /do-droplet-delete    <name-or-id>  → permanently delete a droplet (with confirmation)
+  /do-droplet-resize    <name-or-id> <size-slug>  → resize a droplet
+
+Networking
+  /do-reserved-ip-assign <ip> <name-or-id>  → assign a reserved IP to a droplet
+
+Jobs
+  /do-deploy-cancel <job-id>          → cancel a running snapshot or restore job
 ```
 
 See [docs/commands.md](docs/commands.md) for the full command reference including bot management.
+
+> **Adding new Slack commands?** Register them in `slack-bot/manifest.yml`, then go to [api.slack.com/apps](https://api.slack.com/apps) → your app → **From a manifest** and paste the updated file. Existing commands keep working without interruption.
 
 ---
 
@@ -114,19 +137,29 @@ Both the **scripts token** (`snaprestore-scripts`) and the **Slack bot token** (
 **Restore when needed:**
 ```bash
 ./do-restore.sh
-# Select snapshot → choose size → assign reserved IP
+# Select snapshot → choose size → attach SSH key → assign reserved IP
+# Asks: schedule auto-destroy? → preset picker (30m / 1h / 2h … 7d) or custom
 # Same IP, same DNS, same Cloudflare config
+
+# Or pass flags directly:
+./do-restore.sh --auto-destroy 4h   # destroy automatically after 4 hours
+./do-restore.sh --dry-run           # print all operations without executing
 ```
 
 **Via Slack** (no SSH required):
 ```
 /do-snapshot
-# Bot asks: shut down before snapshotting? → Yes/No buttons
-# After snapshot: restart droplet? → Yes/No buttons
+# Bot asks: shut down before snapshotting? → confirmation buttons
+# After snapshot: restart droplet? → confirmation buttons
 
-/do-restore my-droplet-snapshot-20260527-0100
-# Bot creates droplet, installs nginx welcome page via cloud-init,
-# runs HTTP health check, posts IP and status to the thread
+/do-restore
+# Dropdown of all available snapshots → select one
+# Bot auto-selects the smallest size that satisfies the snapshot's min disk
+# Creates droplet, installs nginx welcome page via cloud-init,
+# runs HTTP health check, posts IP and SSH command to the thread
+
+/do-droplet-list   → see running droplets and their IPs at a glance
+/do-help           → full command list in-channel
 ```
 
 ---

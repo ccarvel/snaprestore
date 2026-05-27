@@ -1,10 +1,10 @@
 {
   "last_updated": "2026-05-27",
-  "last_session": "session 5 — Claude Code (main)",
-  "git_sha": "bff240c",
-  "worktree_state": "dirty — slack-bot/cloud-init/controller.yml modified (contains live SSH key + 1Password service account token; intentionally never committed)",
-  "current_focus": "Housekeeping and documentation pass: CLAUDE.md added, setup-op-fix.md removed from repo, README fully updated to reflect all session work (interactive confirmations, nginx restore, new docs, correct token scopes).",
-  "exact_next_step": "Run `/do-restore <snapshot-id>` in Slack to verify the full restore flow end-to-end — confirm droplet creates, nginx welcome page loads at the new droplet's IP, and health check reports back in the Slack thread.",
+  "last_session": "session 6 — Antigravity (next)",
+  "git_sha": "ea9fe7a",
+  "worktree_state": "clean on branch next — pushed to origin/next. Untracked: prompt-01.md, slack-bot/uv.lock (neither committed by design). slack-bot/cloud-init/controller.yml remains locally dirty with live secrets; intentionally never committed.",
+  "current_focus": "Implemented all PARKING_LOT Slack commands and bot improvements on branch 'next'. Branch is pushed to origin; ready for Slack manifest update and controller deploy.",
+  "exact_next_step": "Apply the updated Slack app manifest: open https://api.slack.com/apps → DO Snap Bot → App Manifest → YAML tab → paste contents of slack-bot/manifest.yml → Save. Then follow docs/next-steps.md Part 2 to rsync and restart the bot on the controller.",
   "blockers": [
     {
       "description": "slack-bot/cloud-init/controller.yml contains a live 1Password service account token and SSH public key — must never be staged or committed. Always skip in git add.",
@@ -12,23 +12,40 @@
       "owner": "operator"
     },
     {
-      "description": "/do-restore Slack flow has not been tested end-to-end. Snapshot creation confirmed working; restore (droplet create + nginx cloud-init + health check) has not been verified in production.",
-      "severity": "medium",
+      "description": "Slack manifest not yet re-applied. New commands (/do-snapshot-list, /do-snapshot-delete, /do-droplet-*, /do-reserved-ip-assign) will return 'app has no handler' until manifest is updated at api.slack.com AND new bot.py is deployed to the controller.",
+      "severity": "high",
+      "owner": "operator"
+    },
+    {
+      "description": "New bot code not yet deployed to controller droplet (104.236.56.16). bot.py on the controller is still the previous version with only 3 commands.",
+      "severity": "high",
       "owner": "operator"
     }
   ],
   "open_tasks": [
-    "Live-test /do-restore end-to-end in Slack — verify droplet creates, nginx welcome page loads, health check posts result to thread.",
-    "Verify nginx welcome page shows correct droplet name and restore timestamp (IP field shows '(see Slack)' by design).",
-    "Implement /do-snapshot-delete Slack command (see docs/PARKING_LOT.md).",
-    "Implement interactive snapshot selection for /do-restore (currently requires passing snapshot ID/name as argument).",
+    "Apply updated manifest at api.slack.com (see docs/next-steps.md Part 1) — fixes interactivity.is_enabled bug and registers 9 new commands.",
+    "Deploy new bot.py to controller: rsync -av -e 'ssh -i ~/.ssh/id_m3do' slack-bot/ dosnap@104.236.56.16:/opt/do-snap-bot/ && ssh -i ~/.ssh/id_m3do root@104.236.56.16 'systemctl restart do-snap-bot'",
+    "Smoke test all new commands in Slack per docs/next-steps.md Part 3.",
+    "Optionally configure scheduled snapshots and retention policy in .env.op on the controller (see docs/next-steps.md Part 4).",
+    "Live-test /do-restore end-to-end — verify droplet creates, nginx welcome page loads, health check posts to Slack thread (was blocked in session 5; now interactive selection is also implemented).",
     "Evaluate Oracle Cloud Always Free as zero-cost controller droplet replacement (see docs/slack-integration-options.md).",
-    "Add nginx welcome page to do-restore.sh bash script for parity with Slack bot (see docs/PARKING_LOT.md)."
+    "Merge branch 'next' into 'main' once deploy is verified."
   ],
   "completed_this_session": [
-    "Created CLAUDE.md — comprehensive Claude Code context covering architecture, security rules, bot.py internals, 1Password paths, doctl scopes, deploy workflow, common pitfalls, and AI handoff pointers.",
-    "Removed docs/setup-op-fix.md from git tracking (file kept locally); added to .gitignore; scrubbed all six cross-references from README.md, CLAUDE.md, docs/setup.md, and docs/troubleshooting.md.",
-    "Fully updated README.md: added image:read scope, uv to requirements, all four new docs to documentation table, Slack bot interactive features description, Slack quick-start commands, updated typical workflow with Slack section, updated file structure with CLAUDE.md and new docs.",
-    "Deleted next-cc branch locally and from origin."
+    "Read prompt-01.md and performed three-pass repository analysis; created docs/PARKING-implementation-plan.md as a PR-ready engineering artifact.",
+    "Created branch 'next' from main; all work on this branch.",
+    "Fixed pre-existing manifest bug: interactivity.is_enabled was false despite Block Kit buttons already being in active use.",
+    "Implemented 9 new slash commands in slack-bot/bot.py: /do-snapshot-list, /do-snapshot-delete, /do-droplet-list, /do-droplet-create, /do-droplet-power-on, /do-droplet-power-off, /do-droplet-delete, /do-droplet-resize, /do-reserved-ip-assign.",
+    "Bot improvement #1: upgraded /do-restore to show Block Kit selection buttons (up to 5 snapshots) instead of a text list when no argument given.",
+    "Bot improvement #2: added _scheduled_snapshot_loop() background asyncio task; enabled via SNAPSHOT_SCHEDULE_INTERVAL_HOURS + SNAPSHOT_SCHEDULE_CHANNEL env vars.",
+    "Bot improvement #3: added _prune_snapshots() retention engine; runs after every snapshot; configurable via SNAPSHOT_RETENTION_DAYS and/or SNAPSHOT_RETENTION_COUNT.",
+    "Added shared infrastructure: _ask_selection(), @app.action('selection_pick'), delete_snapshot(), delete_droplet(), list_ssh_keys(), list_reserved_ips(), _resolve_droplet(), _droplet_public_ip(), _snap_age_days().",
+    "Updated slack-bot/manifest.yml with all 9 new command entries and interactivity fix.",
+    "Updated .env.op.example with 5 new env var templates (scheduling + retention).",
+    "Updated docs/commands.md and slack-bot/README-slack-bot.md with full new command reference and variables table.",
+    "Added slack-bot/tests/test_bot.py — 17 unit tests, all passing (ruff lint clean, pytest 17/17).",
+    "Added pyproject.toml optional dev dependencies (pytest, pytest-asyncio).",
+    "Created docs/next-steps.md — complete 4-part deployment guide including rollback procedure.",
+    "Pushed branch 'next' to origin/next (commit ea9fe7a)."
   ]
 }

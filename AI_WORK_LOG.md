@@ -3,6 +3,51 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-27 — Session 6 (Antigravity — next)
+
+**Focus:** Implement all PARKING_LOT Slack commands, Block Kit restore selection, background scheduling & snapshot retention, and add robust tests.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `docs/PARKING-implementation-plan.md` | Created — engineering design plan for the feature set | `15c41dc` |
+| `slack-bot/bot.py` | Modified — implemented 9 new slash commands, interactive snapshot restore picker, background scheduled snapshots, and pruning retention logic | `15c41dc` |
+| `slack-bot/manifest.yml` | Modified — updated Slack app manifest with interactivity fix and 9 new slash command definitions | `15c41dc` |
+| `slack-bot/.env.op.example` | Modified — added retention and scheduled snapshot variables | `15c41dc` |
+| `docs/commands.md` | Modified — added reference guide for the 9 new slash commands | `15c41dc` |
+| `slack-bot/README-slack-bot.md` | Modified — documented scheduling/retention parameters and all new commands | `15c41dc` |
+| `slack-bot/pyproject.toml` | Modified — added `dev` optional dependency group with pytest & pytest-asyncio | `15c41dc` |
+| `slack-bot/tests/test_bot.py` | Created — added 17 asynchronous unit tests for bot.py's command and helper logic | `15c41dc` |
+| `docs/next-steps.md` | Created — added complete 4-part deployment, verification, and rollback guide | `ea9fe7a` |
+| `ai_status.json` | Updated — reflected session accomplishments and next steps | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 6 entry | this handoff |
+
+### Commands run
+
+```bash
+git checkout -b next
+git status
+pip install -e ".[dev]"
+pytest
+git add docs/PARKING-implementation-plan.md slack-bot/bot.py slack-bot/manifest.yml slack-bot/.env.op.example docs/commands.md slack-bot/README-slack-bot.md slack-bot/pyproject.toml slack-bot/tests/test_bot.py
+git commit -m "feat(bot): implement Slack commands & bot improvements from PARKING_LOT"
+git add docs/next-steps.md
+git commit -m "docs: add next-steps.md — Slack manifest + controller deployment guide"
+git push origin next
+```
+
+### Validations
+- Asynchronous Unit Tests (slack-bot/tests/test_bot.py): pass (17/17 passed)
+- Ruff Linting: pass (no issues found)
+
+### Outcome
+Implemented 9 new slash commands covering droplet management, reserved IP assignment, and snapshot details. Redesigned `/do-restore` command to offer interactive confirmation buttons for snapshot selection using Slack Block Kit. Added a background snapshot scheduler and a retention policy manager to prune older snapshots automatically. Verified all core bot logic via a comprehensive test suite of 17 passing unit tests. Pushed all changes to branch `next` and wrote a complete, step-by-step deployment guide (`docs/next-steps.md`).
+
+### Next step
+Apply the updated Slack app manifest: open https://api.slack.com/apps → DO Snap Bot → App Manifest → YAML tab → paste contents of slack-bot/manifest.yml → Save. Then follow docs/next-steps.md Part 2 to rsync and restart the bot on the controller.
+
+---
 ## 2026-05-27 — Session 5 (Claude Code — main)
 
 **Focus:** CLAUDE.md, remove setup-op-fix.md from repo, README fully updated.

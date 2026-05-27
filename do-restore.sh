@@ -21,29 +21,55 @@ QUIET=false
 JSON_OUT=false
 LOG_FILE=""
 TAGS=""
+AUTO_DESTROY=""
+AUTO_DESTROY_SECS=0
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --dry-run       Print operations without executing any API calls
-  --quiet         Suppress all non-error output
-  --json          Emit final state as JSON on stdout
-  --log FILE      Tee all output to FILE (appends)
-  --tags TAGS     Comma-separated tags to apply to the new droplet
-  --help          Show this help
+  --dry-run              Print operations without executing any API calls
+  --quiet                Suppress all non-error output
+  --json                 Emit final state as JSON on stdout
+  --log FILE             Tee all output to FILE (appends)
+  --tags TAGS            Comma-separated tags to apply to the new droplet
+  --auto-destroy DURATION  Destroy the droplet after DURATION (e.g. 30m, 2h, 1d)
+  --help                 Show this help
 EOF
   exit 0
 }
 
+# Parse a duration string like 30m / 2h / 1d into seconds.
+# Prints the integer on stdout; exits non-zero and prints nothing on bad input.
+_parse_duration() {
+  local input="$1"
+  if [[ "$input" =~ ^([0-9]+)([mhd])$ ]]; then
+    local num="${BASH_REMATCH[1]}" unit="${BASH_REMATCH[2]}"
+    case "$unit" in
+      m) echo $(( num * 60 )) ;;
+      h) echo $(( num * 3600 )) ;;
+      d) echo $(( num * 86400 )) ;;
+    esac
+  else
+    return 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dry-run) DRY_RUN=true ;;
-    --quiet)   QUIET=true ;;
-    --json)    JSON_OUT=true ;;
-    --log)     LOG_FILE="$2"; shift ;;
-    --tags)    TAGS="$2"; shift ;;
+    --dry-run)       DRY_RUN=true ;;
+    --quiet)         QUIET=true ;;
+    --json)          JSON_OUT=true ;;
+    --log)           LOG_FILE="$2"; shift ;;
+    --tags)          TAGS="$2"; shift ;;
+    --auto-destroy)
+      AUTO_DESTROY="$2"; shift
+      AUTO_DESTROY_SECS=$(_parse_duration "$AUTO_DESTROY") || {
+        echo "Invalid --auto-destroy value '$AUTO_DESTROY'. Use e.g. 30m, 2h, 1d." >&2
+        exit 1
+      }
+      ;;
     --help)    usage ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -315,16 +341,54 @@ if [[ -z "$DROPLET_NAME" ]]; then
   DROPLET_NAME=$(ui_input "Droplet name" "$DEFAULT_NAME")
 fi
 
+# ── auto-destroy prompt (interactive, skipped if --auto-destroy was passed) ───
+
+_DURATION_PRESETS=(
+  "30m|30 minutes"
+  "1h|1 hour"
+  "2h|2 hours"
+  "4h|4 hours"
+  "8h|8 hours"
+  "12h|12 hours"
+  "24h|24 hours"
+  "2d|2 days"
+  "7d|7 days"
+  "custom|Enter a custom duration"
+)
+
+if [[ -z "$AUTO_DESTROY" ]]; then
+  ui_confirm "Schedule auto-destroy for this droplet?" "N" && {
+    SELECTED=$(ui_choose "Auto-destroy after:" "${_DURATION_PRESETS[@]}")
+    SELECTED_KEY=$(echo "$SELECTED" | cut -d'|' -f1)
+    if [[ "$SELECTED_KEY" == "custom" ]]; then
+      while true; do
+        AUTO_DESTROY=$(ui_input "Duration (e.g. 30m, 2h, 1d)" "")
+        AUTO_DESTROY_SECS=$(_parse_duration "$AUTO_DESTROY" 2>/dev/null) && break
+        ui_warn "Invalid format '$AUTO_DESTROY' — use <number><m|h|d>, e.g. 90m, 3h, 1d."
+      done
+    else
+      AUTO_DESTROY="$SELECTED_KEY"
+      AUTO_DESTROY_SECS=$(_parse_duration "$AUTO_DESTROY")
+    fi
+  } || true
+fi
+
 # ── confirm summary ───────────────────────────────────────────────────────────
 
+AUTO_DESTROY_LABEL="(none)"
+if [[ -n "$AUTO_DESTROY" ]]; then
+  AUTO_DESTROY_LABEL="$AUTO_DESTROY (destroy at $(date -d "+${AUTO_DESTROY_SECS} seconds" 2>/dev/null || date -r $(( $(date +%s) + AUTO_DESTROY_SECS )) 2>/dev/null))"
+fi
+
 ui_panel "Creating Droplet" \
-  "Name"        "$DROPLET_NAME" \
-  "Size"        "$SIZE_SLUG" \
-  "Region"      "$SNAPSHOT_REGION" \
-  "Image"       "$SNAPSHOT_ID ($SNAPSHOT_NAME)" \
-  "SSH Key"     "${SSH_KEY_ID:-(none)}" \
-  "Reserved IP" "${RESERVED_IP:-(none)}" \
-  "Tags"        "${TAGS:-(none)}"
+  "Name"         "$DROPLET_NAME" \
+  "Size"         "$SIZE_SLUG" \
+  "Region"       "$SNAPSHOT_REGION" \
+  "Image"        "$SNAPSHOT_ID ($SNAPSHOT_NAME)" \
+  "SSH Key"      "${SSH_KEY_ID:-(none)}" \
+  "Reserved IP"  "${RESERVED_IP:-(none)}" \
+  "Tags"         "${TAGS:-(none)}" \
+  "Auto-destroy" "$AUTO_DESTROY_LABEL"
 
 ui_confirm "Proceed?" || { echo "[restore] user aborted at Proceed prompt" >&2; ui_info "Aborted."; exit 0; }
 echo "[restore] user confirmed — starting droplet creation"
@@ -424,6 +488,32 @@ if [[ -n "$RESERVED_IP" ]]; then
   CURRENT_OP=""
 fi
 
+# ── auto-destroy ─────────────────────────────────────────────────────────────
+
+AUTO_DESTROY_INFO="(none)"
+if [[ -n "$AUTO_DESTROY" ]]; then
+  DESTROY_AT=$(date -d "+${AUTO_DESTROY_SECS} seconds" 2>/dev/null || date -r $(( $(date +%s) + AUTO_DESTROY_SECS )) 2>/dev/null)
+  if [[ "$DRY_RUN" == true ]]; then
+    AUTO_DESTROY_INFO="[DRY-RUN] would delete $NEW_DROPLET_ID in $AUTO_DESTROY (at $DESTROY_AT)"
+    ui_info "$AUTO_DESTROY_INFO"
+  else
+    # Capture variables needed by the subshell before we fork
+    _ad_id="$NEW_DROPLET_ID"
+    _ad_ctx="$DOCTL_CONTEXT"
+    _ad_secs="$AUTO_DESTROY_SECS"
+    (
+      sleep "$_ad_secs"
+      doctl --context "$_ad_ctx" compute droplet delete "$_ad_id" --force \
+        >> "${LOG_FILE:-/dev/null}" 2>&1
+    ) &
+    AUTO_DESTROY_PID=$!
+    disown "$AUTO_DESTROY_PID"
+    AUTO_DESTROY_INFO="$AUTO_DESTROY (at $DESTROY_AT) · cancel: kill $AUTO_DESTROY_PID"
+    ui_info "Auto-destroy scheduled: droplet $NEW_DROPLET_ID will be deleted in $AUTO_DESTROY."
+    ui_info "To cancel: kill $AUTO_DESTROY_PID"
+  fi
+fi
+
 # ── final summary ─────────────────────────────────────────────────────────────
 
 ui_panel "Done" \
@@ -431,32 +521,37 @@ ui_panel "Done" \
   "Droplet IP"   "$NEW_DROPLET_IP" \
   "Reserved IP"  "${RESERVED_IP:-(none)}" \
   "Tags"         "${TAGS:-(none)}" \
-  "Connect"      "ssh root@$CONNECT_IP"
+  "Connect"      "ssh root@$CONNECT_IP" \
+  "Auto-destroy" "$AUTO_DESTROY_INFO"
 
 # ── JSON output ───────────────────────────────────────────────────────────────
 
 if [[ "$JSON_OUT" == true ]]; then
   jq -n \
-    --arg droplet_id    "$NEW_DROPLET_ID" \
-    --arg droplet_name  "$DROPLET_NAME" \
-    --arg droplet_ip    "$NEW_DROPLET_IP" \
-    --arg reserved_ip   "${RESERVED_IP:-}" \
-    --arg connect_ip    "$CONNECT_IP" \
-    --arg snapshot_id   "$SNAPSHOT_ID" \
-    --arg snapshot_name "$SNAPSHOT_NAME" \
-    --arg size          "$SIZE_SLUG" \
-    --arg region        "$SNAPSHOT_REGION" \
-    --arg tags          "${TAGS:-}" \
+    --arg droplet_id       "$NEW_DROPLET_ID" \
+    --arg droplet_name     "$DROPLET_NAME" \
+    --arg droplet_ip       "$NEW_DROPLET_IP" \
+    --arg reserved_ip      "${RESERVED_IP:-}" \
+    --arg connect_ip       "$CONNECT_IP" \
+    --arg snapshot_id      "$SNAPSHOT_ID" \
+    --arg snapshot_name    "$SNAPSHOT_NAME" \
+    --arg size             "$SIZE_SLUG" \
+    --arg region           "$SNAPSHOT_REGION" \
+    --arg tags             "${TAGS:-}" \
+    --arg auto_destroy     "${AUTO_DESTROY:-}" \
+    --argjson auto_destroy_secs "${AUTO_DESTROY_SECS:-0}" \
     '{
-      droplet_id:    $droplet_id,
-      droplet_name:  $droplet_name,
-      droplet_ip:    $droplet_ip,
-      reserved_ip:   $reserved_ip,
-      connect_ip:    $connect_ip,
-      snapshot_id:   $snapshot_id,
-      snapshot_name: $snapshot_name,
-      size:          $size,
-      region:        $region,
-      tags:          ($tags | if . == "" then [] else split(",") end)
+      droplet_id:          $droplet_id,
+      droplet_name:        $droplet_name,
+      droplet_ip:          $droplet_ip,
+      reserved_ip:         $reserved_ip,
+      connect_ip:          $connect_ip,
+      snapshot_id:         $snapshot_id,
+      snapshot_name:       $snapshot_name,
+      size:                $size,
+      region:              $region,
+      tags:                ($tags | if . == "" then [] else split(",") end),
+      auto_destroy:        $auto_destroy,
+      auto_destroy_secs:   $auto_destroy_secs
     }'
 fi

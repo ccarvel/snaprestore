@@ -8,13 +8,53 @@ features:
     display_name: DO Snap Bot
     always_online: true
   slash_commands:
+    - command: /do-help
+      description: List all available DO Snap Bot commands
+      usage_hint: ""
+      should_escape: false
     - command: /do-snapshot
       description: Snapshot a DigitalOcean droplet (shuts it down first)
       usage_hint: "[droplet-name-or-id]"
       should_escape: false
+    - command: /do-snapshot-list
+      description: List recent droplet snapshots with size, age, and cost
+      usage_hint: ""
+      should_escape: false
+    - command: /do-snapshot-delete
+      description: Delete a snapshot (with confirmation)
+      usage_hint: "[snapshot-id-or-name]"
+      should_escape: false
     - command: /do-restore
       description: Restore a droplet from a snapshot
       usage_hint: "[snapshot-id-or-name]"
+      should_escape: false
+    - command: /do-droplet-list
+      description: List all droplets with name, status, size, region, and IP
+      usage_hint: ""
+      should_escape: false
+    - command: /do-droplet-create
+      description: Create a droplet from a snapshot or base image
+      usage_hint: "<name> [size] [image]"
+      should_escape: false
+    - command: /do-droplet-power-on
+      description: Power on a stopped droplet
+      usage_hint: "<name-or-id>"
+      should_escape: false
+    - command: /do-droplet-power-off
+      description: Graceful shutdown of a droplet (with confirmation)
+      usage_hint: "<name-or-id>"
+      should_escape: false
+    - command: /do-droplet-delete
+      description: Delete a droplet (with confirmation; warns if no recent snapshot)
+      usage_hint: "<name-or-id>"
+      should_escape: false
+    - command: /do-droplet-resize
+      description: Resize a droplet to a new size slug (powers off first)
+      usage_hint: "<name-or-id> <size-slug>"
+      should_escape: false
+    - command: /do-reserved-ip-assign
+      description: Reassign a reserved IP to a droplet
+      usage_hint: "<ip> <droplet-name-or-id>"
       should_escape: false
     - command: /do-deploy-cancel
       description: Cancel a running snapshot or restore job
@@ -34,4 +74,4 @@ settings:
   token_rotation_enabled: false
   org_deploy_enabled: false
   interactivity:
-    is_enabled: false
+    is_enabled: true
