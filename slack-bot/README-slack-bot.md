@@ -25,7 +25,16 @@ A Slack Bolt app that runs DigitalOcean snapshot and restore operations via slas
 | Command | Description |
 |---------|-------------|
 | `/do-snapshot [name-or-id]` | Snapshot a droplet (prompts to shut down first for consistency). Prompts if multiple droplets exist. |
-| `/do-restore [snap-id-or-name]` | Create a droplet from a snapshot. Lists recent snapshots if no argument given. |
+| `/do-snapshot-list` | List recent droplet snapshots with name, size, age, and estimated monthly cost. |
+| `/do-snapshot-delete [id-or-name]` | Delete a snapshot. Shows selection buttons if no argument given. Confirmation required. |
+| `/do-restore [snap-id-or-name]` | Create a droplet from a snapshot. Shows snapshot selection buttons if no argument given. |
+| `/do-droplet-list` | List all droplets with name, status, size, region, and public IP. |
+| `/do-droplet-create <name> [size] [image]` | Create a new droplet from a snapshot or base image. Prompts for image via buttons if omitted. |
+| `/do-droplet-power-on <name-or-id>` | Power on a stopped droplet. |
+| `/do-droplet-power-off <name-or-id>` | Graceful shutdown with power-off fallback. Confirmation required. |
+| `/do-droplet-delete <name-or-id>` | Delete a droplet. Warns if no recent snapshot. Confirmation required. |
+| `/do-droplet-resize <name-or-id> <size>` | Resize a droplet (e.g. `s-2vcpu-2gb`). Powers off first; offers to restart after. |
+| `/do-reserved-ip-assign <ip> <name-or-id>` | Reassign a reserved IP to a running droplet. |
 | `/do-deploy-cancel <job-id>` | Cancel a running snapshot or restore job by job ID. |
 
 All operations run asynchronously and post status updates in a Slack thread. Long-running steps (shutdown, snapshot creation, droplet creation) post elapsed-time heartbeats every 2 minutes.
@@ -390,5 +399,10 @@ sudo journalctl -u do-snap-bot -f
 | `DIGITALOCEAN_ACCESS_TOKEN` | `.env.op` | DigitalOcean API token for bot operations |
 | `SLACK_ALLOWED_USERS` | `.env.op` | Comma-separated Slack member IDs allowed to run commands |
 | `OP_SERVICE_ACCOUNT_TOKEN` | `/etc/do-snap-bot/env` on controller | 1Password service account token for non-interactive `op run` |
+| `SNAPSHOT_SCHEDULE_INTERVAL_HOURS` | `.env.op` (optional) | Hours between scheduled auto-snapshots (e.g. `24`). Unset = disabled. |
+| `SNAPSHOT_SCHEDULE_CHANNEL` | `.env.op` (optional) | Slack channel ID for scheduled snapshot results. Required when scheduling enabled. |
+| `SNAPSHOT_SCHEDULE_DROPLET` | `.env.op` (optional) | Droplet name or ID for scheduled snapshots. Auto-detected if only one droplet exists. |
+| `SNAPSHOT_RETENTION_DAYS` | `.env.op` (optional) | Delete snapshots older than N days after each snapshot. Unset = disabled. |
+| `SNAPSHOT_RETENTION_COUNT` | `.env.op` (optional) | Keep only the N most recent snapshots per droplet. Unset = disabled. |
 
 All secrets except `OP_SERVICE_ACCOUNT_TOKEN` are resolved at runtime by `op run` — they never touch disk on the controller droplet.
