@@ -3,6 +3,53 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-27 — Session 4 (Claude Code — main)
+
+**Focus:** Interactive Slack confirmations, nginx welcome page, reference docs, branch cleanup.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `slack-bot/bot.py` | Added interactive Block Kit shutdown/restart confirmations to snapshot flow; wired nginx welcome page cloud-init into restore flow | `018cb24` |
+| `docs/snaprestore-viz.md` | Created — ASCII architecture diagrams | `018cb24` |
+| `docs/slack-integration-options.md` | Created — snapshot delete commands, Slack connection modes, free controller alternatives | `018cb24` |
+| `docs/benchmarks-speed-tests.md` | Created — timing methodology, ranges, comparison table, benchmark log template | `018cb24` |
+| `docs/PARKING_LOT.md` | Created — checkbox backlog for parity, Slack commands, bot improvements | `018cb24` |
+| `ai_status.json` | Updated | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 4 entry | this handoff |
+
+### Commands run
+
+```bash
+git status --short
+git log -n 5 --oneline
+git add slack-bot/bot.py docs/PARKING_LOT.md docs/benchmarks-speed-tests.md docs/slack-integration-options.md docs/snaprestore-viz.md
+git commit -m "Add interactive Slack confirmations, nginx welcome page, and reference docs"
+git push origin main
+git branch -d next-cc
+git push origin --delete next-cc
+rsync -av -e "ssh -i ~/.ssh/id_m3do" slack-bot/bot.py dosnap@104.236.56.16:/opt/do-snap-bot/bot.py
+ssh -i ~/.ssh/id_m3do root@104.236.56.16 "systemctl restart do-snap-bot && sleep 3 && systemctl status do-snap-bot --no-pager"
+```
+
+### Validations
+
+- `/do-snapshot` Slack command (shutdown confirmation + snapshot): pass — confirmed working in prior session
+- `/do-restore` Slack command end-to-end (nginx cloud-init + health check): not run — code deployed but not tested live
+- nginx welcome page renders at restored droplet IP: not run
+- `./do-snapshot.sh` bash script: not run this session
+- `./do-restore.sh` bash script: not run this session
+
+### Outcome
+
+Slack bot now has interactive Block Kit button confirmations for the snapshot flow — shutdown prompt before snapshotting (active droplets only), restart prompt after snapshot if the bot shut the droplet down. The nginx welcome page (previously stubbed but never invoked) is now wired into `_restore_job()` via a temp cloud-init file passed to `doctl compute droplet create --user-data-file`. Four reference docs added covering architecture visualization, free hosting alternatives, snapshot/restore benchmarks, and a feature backlog. `next-cc` branch deleted locally and from origin. All changes committed (`018cb24`) and pushed to main. Bot deployed and confirmed `active (running)` on controller at `104.236.56.16`.
+
+### Next step
+
+Run `/do-restore <snapshot-id>` in Slack to verify end-to-end: droplet creates, nginx welcome page loads at the new IP, health check posts result to the Slack thread.
+
+---
 ## 2026-05-26 — Session 3 (Claude Code — next-cc)
 
 **Focus:** No new work — consecutive `/relay-handoff` invocation immediately following session 2. Session boundary marker only.
