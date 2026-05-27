@@ -114,7 +114,7 @@ The controller runs `op run` non-interactively and needs a service account token
 3. Grant **read** access to `<your-vault>`.
 4. Copy the `ops_…` token — shown only once.
 
-> If your organization manages 1Password and you can't create service accounts, see [`docs/setup-op-fix.md`](setup-op-fix.md).
+> If your organization manages 1Password and you can't create service accounts, contact your IT administrator to request a service account with read access to your secrets vault, or use a personal 1Password account instead.
 
 ---
 

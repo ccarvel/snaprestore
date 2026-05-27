@@ -17,7 +17,6 @@ Two bash scripts and an optional Slack bot for managing DigitalOcean droplet sna
 | [Setup guide](docs/setup.md) | First-time setup — covers everything start to finish |
 | [Commands reference](docs/commands.md) | Day-to-day operations cheatsheet |
 | [Troubleshooting](docs/troubleshooting.md) | When something goes wrong |
-| [1Password org account fix](docs/setup-op-fix.md) | If your org's 1Password doesn't allow service accounts |
 
 ---
 
@@ -107,8 +106,7 @@ snaprestore/
 ├── docs/
 │   ├── setup.md              # First-time setup guide
 │   ├── commands.md           # Day-to-day commands reference
-│   ├── troubleshooting.md    # Organized by symptom
-│   └── setup-op-fix.md       # 1Password org account workaround
+│   └── troubleshooting.md    # Organized by symptom
 ├── lib/
 │   ├── bootstrap_sh.sh
 │   ├── ui_sh.sh

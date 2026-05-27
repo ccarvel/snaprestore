@@ -46,7 +46,6 @@ docs/
   setup.md                  # First-time setup guide (Parts 1–6)
   commands.md               # Day-to-day cheatsheet
   troubleshooting.md        # Organized by symptom
-  setup-op-fix.md           # 1Password org account workaround
   snaprestore-viz.md        # Architecture diagrams
   slack-integration-options.md  # Free controller alternatives, Slack connection modes
   benchmarks-speed-tests.md     # Timing methodology and comparison table

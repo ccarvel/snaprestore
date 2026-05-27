@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Organized by symptom. For first-time setup issues with 1Password service accounts, see [`setup-op-fix.md`](setup-op-fix.md).
+Organized by symptom.
 
 ---
 
@@ -202,7 +202,7 @@ The 1Password service account token doesn't have access to the vault referenced 
 - The service account was created without vault access assigned — go to 1password.com → **Developer** → **Service Accounts** → edit the account → grant read access to your vault
 - The vault name in `.env.op` doesn't match the actual vault name — verify with `op vault list`
 
-See [`setup-op-fix.md`](setup-op-fix.md) if your org manages 1Password and you can't assign vault access yourself.
+If your org manages 1Password and you can't assign vault access yourself, contact your IT administrator to grant the service account read access to the relevant vault.
 
 ### No journal entries (`journalctl` returns nothing)
 
