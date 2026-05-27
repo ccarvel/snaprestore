@@ -1,9 +1,9 @@
 {
   "last_updated": "2026-05-27",
-  "last_session": "session 7 — Claude Code (main)",
-  "git_sha": "e2f9baa",
-  "worktree_state": "clean on branch main — all changes committed and pushed. Branch 'next' deleted locally and from remote. slack-bot/cloud-init/controller.yml remains locally dirty with live secrets; intentionally never committed.",
-  "current_focus": "Debugging and extending the Slack bot: fixed /do-restore droplet creation (size slug, duplicate action_id), replaced 5-button pickers with static_select dropdowns showing all snapshots, added /do-help command, added --auto-destroy flag and interactive prompt to do-restore.sh. All changes merged to main.",
+  "last_session": "session 7b — Claude Code (main)",
+  "git_sha": "0beb8db",
+  "worktree_state": "clean on branch main — all changes committed and pushed. slack-bot/cloud-init/controller.yml remains locally dirty with live secrets; intentionally never committed.",
+  "current_focus": "Session 7 wrapped up with a PARKING_LOT entry for Docker Compose auto-start on restore (cloud-init runcmd approach). All prior session work (bot fixes, dropdown pickers, /do-help, --auto-destroy) is merged to main.",
   "exact_next_step": "Apply the updated Slack app manifest to register /do-help: open https://api.slack.com/apps → DO Snap Bot → App Manifest → YAML tab → paste contents of slack-bot/manifest.yml → Save Changes.",
   "blockers": [
     {
@@ -12,28 +12,21 @@
       "owner": "operator"
     },
     {
-      "description": "/do-help slash command added to manifest.yml this session but not yet re-applied at api.slack.com. Until the manifest is updated, /do-help will return 'dispatch_failed' in Slack.",
+      "description": "/do-help slash command added to manifest.yml but not yet re-applied at api.slack.com. Until the manifest is updated, /do-help will return 'dispatch_failed' in Slack.",
       "severity": "medium",
       "owner": "operator"
     }
   ],
   "open_tasks": [
     "Apply updated manifest.yml at api.slack.com to register /do-help (see exact_next_step above).",
-    "Add auto-destroy support to the Slack bot's /do-restore command (analog of the --auto-destroy flag added to do-restore.sh this session) — not yet implemented in bot.py.",
+    "Add auto-destroy support to the Slack bot's /do-restore command (analog of the --auto-destroy flag added to do-restore.sh) — not yet implemented in bot.py.",
+    "Implement Docker Compose auto-start on restore via cloud-init runcmd (see docs/PARKING_LOT.md — operator should add restart: unless-stopped to compose files now; implementation deferred).",
     "Live-test /do-restore end-to-end with a real snapshot to confirm size-slug auto-selection and ssh-key attachment work correctly in production.",
     "Evaluate Oracle Cloud Always Free as zero-cost controller droplet replacement (see docs/slack-integration-options.md).",
     "Optionally configure scheduled snapshots and retention policy in .env.op on the controller (see docs/next-steps.md Part 4)."
   ],
   "completed_this_session": [
-    "Fixed /do-restore 'Droplet creation failed': root cause was hardcoded size_slug 's-1vcpu-1gb' (25 GB) rejected by DO when snapshot min_disk_size > 25 GB. Now auto-selects smallest satisfying size from a stepped map (s-1vcpu-1gb → s-8vcpu-16gb).",
-    "Added --ssh-keys arg to the restore droplet create call (was missing; _droplet_create_job already had it).",
-    "Fixed Block Kit 'invalid_blocks' error in snapshot selection: all 5 buttons shared action_id 'selection_pick'; Slack rejects duplicate action_ids in one actions block. Replaced button layout with a single static_select dropdown (supports up to 100 options).",
-    "Removed 5-snapshot cap from /do-restore, /do-snapshot-delete, and /do-droplet-create — all pickers now show every available snapshot sorted newest-first.",
-    "Added /do-help command: posts full grouped command reference in-channel; registered in manifest.yml.",
-    "Added --auto-destroy DURATION flag to do-restore.sh: validates <N><m|h|d> at parse time, shows scheduled destroy time in confirm panel, spawns disowned background subshell after successful create, prints cancel PID.",
-    "Added interactive auto-destroy prompt to do-restore.sh when flag is omitted: Y/N confirm → preset picker (30m/1h/2h/4h/8h/12h/24h/2d/7d/custom) → loops on custom input until valid.",
-    "Updated README.md: What's included, Quick start (bash + Slack full command list), Typical workflow, manifest update note.",
-    "Tracked slack-bot/uv.lock and removed prompt-01.md.",
-    "All changes committed and pushed; branch 'next' merged to main and deleted."
+    "Added Docker Compose auto-start parking lot item to docs/PARKING_LOT.md with two-part note: operator action (restart: unless-stopped) and implementation spec (cloud-init runcmd via DOCKER_COMPOSE_DIRS env var + --compose-dir flag).",
+    "Committed and pushed to main (0beb8db)."
   ]
 }

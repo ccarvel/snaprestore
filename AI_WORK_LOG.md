@@ -3,6 +3,36 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-27 — Session 7b (Claude Code — main)
+
+**Focus:** Document Docker Compose auto-start pattern for restore; close out session 7.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `docs/PARKING_LOT.md` | Modified — added Docker Compose auto-start item with operator note (restart: unless-stopped) and implementation spec (cloud-init runcmd, DOCKER_COMPOSE_DIRS env var, --compose-dir flag) | `0beb8db` |
+| `ai_status.json` | Updated — session 7b state | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 7b entry | this handoff |
+
+### Commands run
+
+```bash
+git add docs/PARKING_LOT.md
+git commit -m "docs: add Docker Compose auto-start parking lot item with operator and implementation notes"
+git push origin main
+```
+
+### Validations
+- Syntax / tests: not run (docs-only change)
+
+### Outcome
+Added a well-scoped PARKING_LOT item covering Docker Compose auto-start on droplet restore. Separated the immediate operator action (add `restart: unless-stopped` to compose files) from the deferred implementation work (extend `build_welcome_cloud_init()` in bot.py and add `--compose-dir` to do-restore.sh using cloud-init `runcmd`). Main branch is clean and up to date.
+
+### Next step
+Apply the updated Slack app manifest to register /do-help: open https://api.slack.com/apps → DO Snap Bot → App Manifest → YAML tab → paste contents of slack-bot/manifest.yml → Save Changes.
+
+---
 ## 2026-05-27 — Session 7 (Claude Code — main)
 
 **Focus:** Debug and fix the live Slack bot; extend /do-restore and do-restore.sh with new features; clean up repo.
