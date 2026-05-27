@@ -8,6 +8,23 @@ Planned features and improvements, roughly in priority order within each section
 
 - [ ] **Parity:** Add nginx welcome page feature to bash scripts (`do-restore.sh`) — pass `--user-data-file` with the cloud-init YAML at droplet create time, matching the Slack bot behavior
 
+- [ ] **Feature: Auto-start Docker containers on restore** — when a droplet is restored from a snapshot, any Docker Compose stacks that were stopped at snapshot time will not restart automatically (Docker's restart policy only fires on daemon restart, not from a stopped state in a snapshot image).
+
+  **Operator note (do this now, in your compose files):**
+  - Make sure every service in every `docker-compose.yml` has `restart: unless-stopped` (or `restart: always`). This handles reboots and daemon restarts for free — no extra tooling required.
+
+  **Implementation note (for a future session):**
+  - The restore flow in both `do-restore.sh` and `bot.py` already passes a `--user-data-file` (cloud-init YAML) at droplet create time. Extend that YAML to include a `runcmd` section that runs `docker compose up -d` in the relevant directories on first boot.
+  - Example cloud-init addition:
+    ```yaml
+    runcmd:
+      - cd /opt/myapp && docker compose up -d
+      - cd /opt/otherapp && docker compose up -d
+    ```
+  - For `do-restore.sh`: add a `--compose-dir PATH` flag (repeatable) that appends `runcmd` entries to the generated user-data file.
+  - For `bot.py`: read a `DOCKER_COMPOSE_DIRS` env var (comma-separated paths, set in `.env.op` on the controller) and inject those paths as `runcmd` entries in `build_welcome_cloud_init()`. The env var acts as the default; a future `/do-restore` arg could override it per-restore.
+  - Cloud-init `runcmd` runs once at first boot, after networking is up — the right time to bring stacks online.
+
 ---
 
 ## Slack commands
