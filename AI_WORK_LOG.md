@@ -3,6 +3,66 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-27 — Session 7 (Claude Code — main)
+
+**Focus:** Debug and fix the live Slack bot; extend /do-restore and do-restore.sh with new features; clean up repo.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `slack-bot/bot.py` | Modified — fix /do-restore size_slug, fix duplicate action_id, replace buttons with static_select dropdowns, remove 5-snapshot caps, add /do-help | `f895a2f` |
+| `slack-bot/manifest.yml` | Modified — register /do-help slash command | `f895a2f` |
+| `do-restore.sh` | Modified — add --auto-destroy flag, _parse_duration helper, interactive auto-destroy prompt with presets, auto-destroy background job, updated panels and JSON output | `f895a2f` |
+| `README.md` | Modified — full Slack command list, auto-destroy docs, manifest update note, typical workflow updated | `fa1775a` |
+| `slack-bot/uv.lock` | Added — track exact dependency lockfile for reproducible deploys | `256ec4f` |
+| `prompt-01.md` | Deleted — scratch file | `256ec4f` |
+| `ai_status.json` | Updated — session 7 state | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 7 entry | this handoff |
+
+### Commands run
+
+```bash
+# Fix and deploy bot fixes iteratively
+rsync -av -e "ssh -i ~/.ssh/id_m3do" slack-bot/bot.py dosnap@104.236.56.16:/opt/do-snap-bot/
+ssh -i ~/.ssh/id_m3do root@104.236.56.16 "systemctl restart do-snap-bot"
+
+# Commit and push
+git add do-restore.sh slack-bot/bot.py slack-bot/manifest.yml
+git commit -m "feat: fix /do-restore, add dropdown pickers, /do-help, and auto-destroy"
+git push origin next
+
+git add README.md
+git commit -m "docs: update README with full Slack command list, auto-destroy, and bot fixes"
+git push origin next
+
+# Merge next → main (first pass, pre-uv.lock)
+git checkout main && git merge --no-ff next && git push origin main
+
+# uv.lock + prompt-01.md cleanup
+git checkout next
+rm prompt-01.md && git add -f slack-bot/uv.lock
+git commit -m "chore: track slack-bot/uv.lock, remove prompt-01.md"
+git push origin next
+
+# Final merge and branch cleanup
+git checkout main && git merge --no-ff next && git push origin main
+git branch -d next && git push origin --delete next
+```
+
+### Validations
+- Bot deployed and restarted successfully: pass (systemctl status active on each deploy)
+- Block Kit dropdown fix: pass (confirmed via live Slack test — /do-restore showed snapshot picker)
+- Bash syntax check (do-restore.sh): pass (`bash -n` returned OK)
+- Unit tests: not run this session
+
+### Outcome
+Fixed two blocking bugs in the live Slack bot: (1) `/do-restore` was failing with "Droplet creation failed" because the hardcoded `s-1vcpu-1gb` size slug has a 25 GB disk ceiling — now auto-selects the smallest slug satisfying the snapshot's `min_disk_size`; (2) the snapshot selection UI was broken with a Block Kit `invalid_blocks` error caused by duplicate `action_id` values across buttons — replaced with a `static_select` dropdown supporting up to 100 options. Removed the 5-snapshot cap from all three pickers, added `/do-help`, and implemented `--auto-destroy` in `do-restore.sh` with both a flag and an interactive preset picker. All changes merged to main; branch `next` deleted.
+
+### Next step
+Apply the updated Slack app manifest to register /do-help: open https://api.slack.com/apps → DO Snap Bot → App Manifest → YAML tab → paste contents of slack-bot/manifest.yml → Save Changes.
+
+---
 ## 2026-05-27 — Session 6 (Antigravity — next)
 
 **Focus:** Implement all PARKING_LOT Slack commands, Block Kit restore selection, background scheduling & snapshot retention, and add robust tests.
