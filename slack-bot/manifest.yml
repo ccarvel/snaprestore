@@ -8,6 +8,10 @@ features:
     display_name: DO Snap Bot
     always_online: true
   slash_commands:
+    - command: /do-help
+      description: List all available DO Snap Bot commands
+      usage_hint: ""
+      should_escape: false
     - command: /do-snapshot
       description: Snapshot a DigitalOcean droplet (shuts it down first)
       usage_hint: "[droplet-name-or-id]"

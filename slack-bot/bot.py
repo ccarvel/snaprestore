@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -333,7 +334,7 @@ async def _ask_selection(
     options: list[tuple[str, str]],
     timeout: int = 120,
 ) -> str | None:
-    """Post up to 5 labeled buttons for multi-item selection.
+    """Post a dropdown menu for selection (up to 100 options).
 
     Each option is a (label, value) tuple. Returns the selected value or None on timeout.
     The shared @app.action("selection_pick") handler resolves this.
@@ -341,14 +342,12 @@ async def _ask_selection(
     event = asyncio.Event()
     PENDING_CONFIRMATIONS[conf_id] = {"event": event, "value": None}
 
-    buttons = [
+    menu_options = [
         {
-            "type": "button",
             "text": {"type": "plain_text", "text": label[:75]},
-            "action_id": "selection_pick",
             "value": f"{conf_id}:{value}",
         }
-        for label, value in options[:5]
+        for label, value in options[:100]
     ]
 
     await client.chat_postMessage(
@@ -356,7 +355,15 @@ async def _ask_selection(
         thread_ts=thread_ts,
         blocks=[
             {"type": "section", "text": {"type": "mrkdwn", "text": question}},
-            {"type": "actions", "elements": buttons},
+            {
+                "type": "actions",
+                "elements": [{
+                    "type": "static_select",
+                    "action_id": "selection_pick",
+                    "placeholder": {"type": "plain_text", "text": "Choose one…"},
+                    "options": menu_options,
+                }],
+            },
         ],
         text=question,
     )
@@ -375,15 +382,17 @@ async def _ask_selection(
 
 @app.action("selection_pick")
 async def action_selection_pick(ack, body, client):
-    """Shared handler for all _ask_selection() multi-choice buttons."""
+    """Shared handler for the _ask_selection() dropdown menu."""
     await ack()
-    raw_value = body["actions"][0]["value"]
+    action = body["actions"][0]
+    selected = action.get("selected_option") or {}
+    raw_value = selected.get("value", "")
+    label = selected.get("text", {}).get("text", raw_value)
     conf_id = raw_value.split(":", 1)[0]
     entry = PENDING_CONFIRMATIONS.get(conf_id)
     if entry:
         entry["value"] = raw_value  # full "conf_id:selected_value"
         entry["event"].set()
-    label = body["actions"][0]["text"]["text"]
     await client.chat_update(
         channel=body["channel"]["id"],
         ts=body["message"]["ts"],
@@ -392,6 +401,40 @@ async def action_selection_pick(ack, body, client):
             "text": {"type": "mrkdwn", "text": f"✅ Selected: *{label}*"},
         }],
         text=f"Selected: {label}",
+    )
+
+
+# ── /do-help ──────────────────────────────────────────────────────────────────
+
+@app.command("/do-help")
+async def cmd_help(ack, body, client):
+    await ack()
+    help_text = (
+        "*SnapRestore — available commands*\n\n"
+        "*Snapshots*\n"
+        "• `/do-snapshot` — snapshot a running droplet (prompts for shutdown/restart options)\n"
+        "• `/do-snapshot-list` — list all droplet snapshots with size and age\n"
+        "• `/do-snapshot-delete` — delete a snapshot (dropdown picker)\n\n"
+        "*Restore & Create*\n"
+        "• `/do-restore [snapshot-id-or-name]` — create a droplet from a snapshot (dropdown picker if no arg)\n"
+        "• `/do-droplet-create <name> [size] [image-id-or-name]` — create a new droplet\n"
+        "  _Default size:_ `s-1vcpu-1gb` · _Example:_ `/do-droplet-create my-server s-2vcpu-4gb`\n\n"
+        "*Droplet management*\n"
+        "• `/do-droplet-list` — list all droplets with status, size, and IP\n"
+        "• `/do-droplet-power-on <name-or-id>` — power on a droplet\n"
+        "• `/do-droplet-power-off <name-or-id>` — graceful power off\n"
+        "• `/do-droplet-delete <name-or-id>` — permanently delete a droplet (asks for confirmation)\n"
+        "• `/do-droplet-resize <name-or-id> <size-slug>` — resize a droplet\n"
+        "  _Example:_ `/do-droplet-resize my-droplet s-2vcpu-2gb`\n\n"
+        "*Networking*\n"
+        "• `/do-reserved-ip-assign <ip> <name-or-id>` — assign a reserved IP to a droplet\n\n"
+        "*Jobs*\n"
+        "• `/do-deploy-cancel <job-id>` — cancel a running job\n\n"
+        "• `/do-help` — show this message"
+    )
+    await client.chat_postMessage(
+        channel=body["channel_id"],
+        text=help_text,
     )
 
 
@@ -804,24 +847,19 @@ async def _snapshot_delete_job(
                     break
 
         if target_snap is None:
-            # offer selection via buttons (up to 5 most recent)
             sorted_snaps = sorted(snapshots, key=lambda x: x.get("created_at", ""), reverse=True)
             options = []
-            for s in sorted_snaps[:5]:
+            for s in sorted_snaps:
                 size_gb = s.get("size_gigabytes", 0) or 0
                 age = _snap_age_days(s)
                 age_str = f"{int(age)}d old"
                 label = f"{s['name'][:40]} ({size_gb}GB, {age_str})"
                 options.append((label, str(s["id"])))
 
-            note = ""
-            if len(sorted_snaps) > 5:
-                note = f"\n_Showing 5 most recent of {len(sorted_snaps)}. Use `/do-snapshot-delete <id>` for others._"
-
             selected_id = await _ask_selection(
                 client, channel, thread_ts,
                 conf_id=f"{job_id}-select",
-                question=f"*Which snapshot do you want to delete?*{note}",
+                question=f"*Which snapshot do you want to delete?* ({len(options)} available)",
                 options=options,
                 timeout=120,
             )
@@ -923,26 +961,21 @@ async def _restore_job(
                     break
 
         if target_snap is None:
-            # Bot improvement #1: button-based selection instead of text listing
             sorted_snaps = sorted(snapshots,
                                    key=lambda x: x.get("created_at", ""),
                                    reverse=True)
             options = []
-            for s in sorted_snaps[:5]:
+            for s in sorted_snaps:
                 size_gb = s.get("size_gigabytes", 0) or 0
                 age = _snap_age_days(s)
                 age_str = f"{int(age)}d old"
                 label = f"{s['name'][:40]} ({size_gb}GB, {age_str})"
                 options.append((label, str(s["id"])))
 
-            note = ""
-            if len(sorted_snaps) > 5:
-                note = f"\n_Showing 5 most recent of {len(sorted_snaps)}. Use `/do-restore <id>` for others._"
-
             selected_id = await _ask_selection(
                 client, channel, thread_ts,
                 conf_id=f"{job_id}-select",
-                question=f"*Which snapshot do you want to restore?*{note}",
+                question=f"*Which snapshot do you want to restore?* ({len(options)} available)",
                 options=options,
                 timeout=120,
             )
@@ -983,10 +1016,27 @@ async def _restore_job(
         droplet_name = snap_name.rsplit("-snapshot-", 1)[0] if "-snapshot-" in snap_name else snap_name
         restore_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                       text=f"🚀 Creating droplet `{droplet_name}` from snapshot…")
+        # Pick the smallest size that satisfies the snapshot's min_disk requirement.
+        # s-1vcpu-1gb has 25 GB; step up through common slugs if needed.
+        _SIZE_DISK_MAP = [
+            ("s-1vcpu-1gb", 25),
+            ("s-1vcpu-2gb", 50),
+            ("s-2vcpu-2gb", 60),
+            ("s-2vcpu-4gb", 80),
+            ("s-4vcpu-8gb", 160),
+            ("s-8vcpu-16gb", 320),
+        ]
+        size_slug = next(
+            (slug for slug, disk in _SIZE_DISK_MAP if disk >= min_disk),
+            "s-8vcpu-16gb",
+        )
 
-        size_slug = "s-1vcpu-1gb"  # minimal; user can override via hint
+        ssh_keys = await list_ssh_keys()
+        ssh_key_args = ["--ssh-keys", str(ssh_keys[0]["id"])] if ssh_keys else []
+
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                       text=(f"🚀 Creating droplet `{droplet_name}` from snapshot…\n"
+                                             f"Size: `{size_slug}` (min disk: {min_disk} GB)"))
 
         cloud_init_yaml = build_welcome_cloud_init(
             droplet_name=droplet_name,
@@ -1005,6 +1055,7 @@ async def _restore_job(
                 "--size", size_slug,
                 "--region", region,
                 "--user-data-file", str(cloud_init_tmp),
+                *ssh_key_args,
                 "--wait",
                 "--output", "json",
             )
@@ -1680,20 +1731,16 @@ async def _droplet_create_job(
 
             sorted_snaps = sorted(snapshots, key=lambda x: x.get("created_at", ""), reverse=True)
             options = []
-            for s in sorted_snaps[:5]:
+            for s in sorted_snaps:
                 size_gb = s.get("size_gigabytes", 0) or 0
                 age = _snap_age_days(s)
                 label = f"{s['name'][:40]} ({size_gb}GB, {int(age)}d old)"
                 options.append((label, str(s["id"])))
 
-            note = ""
-            if len(sorted_snaps) > 5:
-                note = f"\n_Showing 5 most recent of {len(sorted_snaps)}._"
-
             image_id = await _ask_selection(
                 client, channel, thread_ts,
                 conf_id=f"{job_id}-image",
-                question=f"*Select a snapshot to create `{droplet_name}` from:*{note}",
+                question=f"*Select a snapshot to create `{droplet_name}` from:* ({len(options)} available)",
                 options=options,
                 timeout=120,
             )
