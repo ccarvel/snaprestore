@@ -1,13 +1,13 @@
 {
   "last_updated": "2026-05-27",
-  "last_session": "session 4 — Claude Code (main)",
-  "git_sha": "018cb24",
+  "last_session": "session 5 — Claude Code (main)",
+  "git_sha": "bff240c",
   "worktree_state": "dirty — slack-bot/cloud-init/controller.yml modified (contains live SSH key + 1Password service account token; intentionally never committed)",
-  "current_focus": "Slack bot is live on controller droplet (104.236.56.16) with interactive shutdown/restart confirmations and nginx welcome page wired into the restore flow. All docs written. next-cc branch deleted.",
+  "current_focus": "Housekeeping and documentation pass: CLAUDE.md added, setup-op-fix.md removed from repo, README fully updated to reflect all session work (interactive confirmations, nginx restore, new docs, correct token scopes).",
   "exact_next_step": "Run `/do-restore <snapshot-id>` in Slack to verify the full restore flow end-to-end — confirm droplet creates, nginx welcome page loads at the new droplet's IP, and health check reports back in the Slack thread.",
   "blockers": [
     {
-      "description": "slack-bot/cloud-init/controller.yml contains a live 1Password service account token and SSH public key — must never be staged or committed. Operator must manage this file manually.",
+      "description": "slack-bot/cloud-init/controller.yml contains a live 1Password service account token and SSH public key — must never be staged or committed. Always skip in git add.",
       "severity": "high",
       "owner": "operator"
     },
@@ -26,15 +26,9 @@
     "Add nginx welcome page to do-restore.sh bash script for parity with Slack bot (see docs/PARKING_LOT.md)."
   ],
   "completed_this_session": [
-    "Merged next-cc to main and deleted next-cc branch.",
-    "Added interactive Block Kit button confirmations to /do-snapshot Slack flow: shutdown prompt before snapshotting (active droplets only), restart prompt after snapshot completes if bot shut the droplet down.",
-    "Wired build_welcome_cloud_init() into _restore_job() — nginx welcome page now installs via cloud-init on every Slack-triggered restore.",
-    "Updated restore health check message to include clickable http:// URL.",
-    "Created docs/snaprestore-viz.md — ASCII architecture diagrams for local scripts, Slack bot flow, and secret injection.",
-    "Created docs/slack-integration-options.md — snapshot delete commands, Socket Mode vs HTTP Events API comparison, free controller alternatives (Oracle, Fly.io, Lambda analysis, local, Render/Railway).",
-    "Created docs/benchmarks-speed-tests.md — timing methodology, typical ranges by disk usage, comparison table vs alternatives, benchmark log template, optimization tips.",
-    "Created docs/PARKING_LOT.md — checkbox backlog for parity items, Slack commands, and bot improvements.",
-    "Committed and pushed all changes to main (018cb24).",
-    "Deployed updated bot.py to controller droplet; confirmed active (running)."
+    "Created CLAUDE.md — comprehensive Claude Code context covering architecture, security rules, bot.py internals, 1Password paths, doctl scopes, deploy workflow, common pitfalls, and AI handoff pointers.",
+    "Removed docs/setup-op-fix.md from git tracking (file kept locally); added to .gitignore; scrubbed all six cross-references from README.md, CLAUDE.md, docs/setup.md, and docs/troubleshooting.md.",
+    "Fully updated README.md: added image:read scope, uv to requirements, all four new docs to documentation table, Slack bot interactive features description, Slack quick-start commands, updated typical workflow with Slack section, updated file structure with CLAUDE.md and new docs.",
+    "Deleted next-cc branch locally and from origin."
   ]
 }

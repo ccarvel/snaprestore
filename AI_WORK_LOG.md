@@ -3,6 +3,59 @@
 Entries are prepended — most recent first.
 
 ---
+## 2026-05-27 — Session 5 (Claude Code — main)
+
+**Focus:** CLAUDE.md, remove setup-op-fix.md from repo, README fully updated.
+
+### Files changed
+
+| File | Action | Commit |
+|------|--------|--------|
+| `CLAUDE.md` | Created — full Claude Code context for new sessions | `68960d7` |
+| `docs/setup-op-fix.md` | Removed from git tracking (`git rm --cached`); added to `.gitignore` | `643b9b2` |
+| `.gitignore` | Added `docs/setup-op-fix.md` entry | `643b9b2` |
+| `README.md` | Scrubbed setup-op-fix reference; then full update pass | `643b9b2`, `bff240c` |
+| `CLAUDE.md` | Scrubbed setup-op-fix reference | `643b9b2` |
+| `docs/setup.md` | Replaced setup-op-fix link with plain prose | `643b9b2` |
+| `docs/troubleshooting.md` | Replaced two setup-op-fix links with plain prose | `643b9b2` |
+| `ai_status.json` | Updated | this handoff |
+| `AI_WORK_LOG.md` | Prepended session 5 entry | this handoff |
+
+### Commands run
+
+```bash
+git status --short
+git log -n 5 --oneline
+grep -rn "setup-op-fix" . --include="*.md" --include="*.sh" --include="*.py"
+git rm --cached docs/setup-op-fix.md
+git add .gitignore README.md CLAUDE.md docs/setup.md docs/troubleshooting.md
+git commit -m "Remove setup-op-fix.md from repo; add to .gitignore; scrub references"
+git push origin main
+git add README.md
+git commit -m "update: README — scopes, Slack bot features, new docs, file structure"
+git push origin main
+git branch -d next-cc
+git push origin --delete next-cc
+```
+
+### Validations
+
+- `CLAUDE.md` accuracy vs actual repo state: pass — reviewed against all key files before writing
+- All setup-op-fix.md references removed: pass — grep confirmed zero remaining
+- `/do-restore` Slack end-to-end (nginx + health check): not run
+- nginx welcome page renders at restored IP: not run
+- `./do-snapshot.sh` bash script: not run this session
+- `./do-restore.sh` bash script: not run this session
+
+### Outcome
+
+Session was a documentation and housekeeping pass. `CLAUDE.md` gives any new Claude Code session immediate orientation: architecture, security rules, bot internals, 1Password paths, deploy commands, pitfall table, and handoff pointers. `setup-op-fix.md` (contained a draft IT email) removed from GitHub history going forward — file preserved locally, `.gitignore` prevents re-addition. README brought fully up to date: `image:read` scope added, `uv` in requirements, all four new docs in the table, Slack bot interactive features described, Slack workflow section added. Repo is clean on `main` at `bff240c`.
+
+### Next step
+
+Run `/do-restore <snapshot-id>` in Slack to verify end-to-end: droplet creates, nginx welcome page loads at the new IP, health check result posts back to the Slack thread.
+
+---
 ## 2026-05-27 — Session 4 (Claude Code — main)
 
 **Focus:** Interactive Slack confirmations, nginx welcome page, reference docs, branch cleanup.
